@@ -1,0 +1,537 @@
+---
+title: "Fig4"
+output: html_document
+date: "2026-10-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars,fig.width=16,fig.height=20}
+setwd("~/Desktop/codes")
+rm(list = ls())
+
+library(ggplot2)
+library(dplyr)
+library(rstatix)
+library(car)
+library(patchwork)
+library(readxl)   # <-- 新增：读取 Excel
+
+# ---------- Input file (single Excel with 3 sheets) ----------
+data_dir  <- "~/Desktop/codes/data"
+input_xlsx <- file.path(data_dir, "Fig4_data.xlsx")
+
+# Sheet 名称与站点名称一致
+sheet_NB <- "NB"
+sheet_MB <- "MB"
+sheet_SB <- "SB"
+
+# ---------- Color for each site ----------
+site_colors <- c(NB = "#7030A0",
+                 MB = "#2E75B6",
+                 SB = "#A8D5CE")
+
+# ---------- Number formatting ----------
+fmt_num <- function(x, digits = 3) {
+  out <- sprintf(paste0("%.", digits, "f"), x)
+  idx <- abs(x) < 0.5 * 10^(-digits)
+  out[idx] <- sprintf("%.1e", x[idx])
+  out
+}
+
+# ==============================================================================
+# Generic plotting function
+#   show_x_axis: whether to show x-axis labels; angle_x: rotation angle
+# ==============================================================================
+make_boxplot <- function(data, yvar, ylab, color, tag_label = NULL,
+                         show_x_axis = FALSE, angle_x = 0) {
+  cat(sprintf("\n########## %s — Shapiro-Wilk normality test ##########\n", yvar))
+  shapiro_ctrl <- data %>% filter(treatment == "Control")       %>% pull(!!sym(yvar)) %>% shapiro.test()
+  shapiro_n    <- data %>% filter(treatment == "Fertilization") %>% pull(!!sym(yvar)) %>% shapiro.test()
+  cat("Control p:", shapiro_ctrl$p.value, "\n")
+  cat("Fertilization p:", shapiro_n$p.value, "\n")
+  
+  cat(sprintf("\n########## %s — Levene test for homogeneity of variance ##########\n", yvar))
+  fml <- as.formula(paste(yvar, "~ treatment"))
+  lev <- leveneTest(fml, data = data)
+  print(lev)
+  
+  # Welch's t-test (unequal variances)
+  diff_test <- data %>%
+    t_test(fml, var.equal = FALSE, alternative = "two.sided")
+  cat(sprintf("\n=== %s two-sided Welch t-test result ===\n", yvar))
+  print(diff_test)
+  
+  y_max <- max(data[[yvar]], na.rm = TRUE)
+  y_min <- min(data[[yvar]], na.rm = TRUE)
+  y_range <- y_max - y_min
+  y_label_pos <- y_max + 0.12 * y_range
+  
+  # plotmath expression: italic t and italic p; values quoted to support e-notation
+  diff_test <- diff_test %>%
+    mutate(
+      p_label = sprintf("italic(t) == \"%s\" * ',' ~ italic(p) == \"%s\"",
+                        fmt_num(statistic), fmt_num(p)),
+      x_pos = 1.5,
+      y_pos = y_label_pos
+    )
+  
+  group_colors <- c(color, color)
+  
+  x_text_theme <- if (show_x_axis) {
+    if (angle_x == 0) {
+      element_text(colour = "black", size = 28, face = "bold")
+    } else {
+      element_text(colour = "black", size = 28, face = "bold",
+                   angle = angle_x, hjust = 1, vjust = 1)
+    }
+  } else {
+    element_blank()
+  }
+  
+  p <- ggplot(data, aes(x = treatment, y = .data[[yvar]], fill = treatment)) +
+    geom_boxplot(width = 0.2, alpha = 0.5, size = 0.5, outlier.shape = NA) +
+    geom_jitter(
+      aes(color = treatment),
+      position = position_jitter(width = 0.08),
+      size = 6, alpha = 0.5,
+      show.legend = FALSE
+    ) +
+    scale_color_manual(values = group_colors) +
+    scale_fill_manual(values = group_colors) +
+    scale_y_continuous(expand = expansion(mult = c(0.05, 0.25))) +
+    geom_text(
+      data = diff_test,
+      aes(x = x_pos, y = y_pos, label = p_label),
+      size = 9, fontface = "bold", inherit.aes = FALSE,
+      parse = TRUE,            # ← 解析 plotmath 表达式
+      vjust = 0
+    ) +
+    labs(x = "", y = ylab, tag = tag_label) +
+    theme_bw() +
+    theme(
+      legend.position = "none",
+      axis.text.x  = x_text_theme,
+      axis.text.y  = element_text(colour = "black", size = 24, face = "bold"),
+      axis.title.y = element_text(colour = "black", size = 24, face = "bold", angle = 90),
+      axis.ticks.y = element_line(color = "black", size = 1),
+      axis.ticks.x = if (show_x_axis) element_line(color = "black") else element_blank(),
+      panel.grid = element_blank(),
+      panel.border = element_rect(fill = NA, color = "black", size = 1.5),
+      plot.tag = element_text(size = 24, face = "bold")
+    )
+  return(p)
+}
+
+# ---------- Read and tidy data for one site (from a given Excel sheet) ----------
+read_site <- function(xlsx_file, sheet_name) {
+  da <- read_excel(xlsx_file, sheet = sheet_name)
+  da <- da %>%
+    filter(treatment %in% c("CK", "N")) %>%
+    mutate(treatment = factor(treatment,
+                              levels = c("CK", "N"),
+                              labels = c("Control", "Fertilization")))
+  return(da)
+}
+
+# ==============================================================================
+# Generate 4 panels for one site
+# (only the last row "hp" shows x-axis labels, rotated 45°)
+# ==============================================================================
+make_site_panels <- function(xlsx_file, sheet_name, site_name) {
+  da <- read_site(xlsx_file, sheet_name)
+  col <- site_colors[[site_name]]
+  vars  <- c("pH",  "MRG", "ARG", "hp")
+  ylabs <- c("Soil pH", "MRGs", "ARGs", "PHPs")
+  
+  tag_letters <- list(
+    NB = c("a", "b", "c", "d"),
+    MB = c("e", "f", "g", "h"),
+    SB = c("i", "j", "k", "l")
+  )
+  tags <- tag_letters[[site_name]]
+  
+  panels <- lapply(seq_along(vars), function(i) {
+    is_last_row <- (vars[i] == "hp")
+    make_boxplot(da, vars[i], ylabs[i], col,
+                 tag_label   = tags[i],
+                 show_x_axis = is_last_row,
+                 angle_x     = if (is_last_row) 45 else 0)
+  })
+  names(panels) <- vars
+  return(panels)
+}
+
+# ---------- Generate panels for the three sites ----------
+cat("\n=========== Site of NB ===========\n")
+nb <- make_site_panels(input_xlsx, sheet_NB, "NB")
+
+cat("\n=========== Site of MB ===========\n")
+mb <- make_site_panels(input_xlsx, sheet_MB, "MB")
+
+cat("\n=========== Site of SB ===========\n")
+sb <- make_site_panels(input_xlsx, sheet_SB, "SB")
+
+# ---------- Add column titles to the top panel (pH row) of each column ----------
+add_col_title <- function(p, title) {
+  p + labs(title = title) +
+    theme(
+      plot.title = element_text(size = 26, face = "bold",
+                                hjust = 0.5, color = "black",
+                                margin = margin(b = 10))
+    )
+}
+
+nb$pH <- add_col_title(nb$pH, "Site of NB")
+mb$pH <- add_col_title(mb$pH, "Site of MB")
+sb$pH <- add_col_title(sb$pH, "Site of SB")
+
+# ---------- Assemble 4 rows × 3 cols ----------
+row_pH  <- nb$pH  | mb$pH  | sb$pH
+row_MRG <- nb$MRG | mb$MRG | sb$MRG
+row_ARG <- nb$ARG | mb$ARG | sb$ARG
+row_hp  <- nb$hp  | mb$hp  | sb$hp
+
+p_all <- (row_pH) / (row_MRG) / (row_ARG) / (row_hp) +
+  plot_layout(heights = c(1, 1, 1, 1)) +
+  plot_annotation()
+
+p_all <- p_all & theme(plot.tag = element_text(size = 40, face = "bold"))
+
+print(p_all)
+
+# ---------- Save ----------
+ggsave("~/Desktop/codes/figures/Fig4a-l.pdf",
+       plot = p_all, width = 16, height = 20, dpi = 600)
+```
+
+```{r,fig.width=44,fig.height=36}
+setwd("~/Desktop/codes")
+library(dplyr)
+library(ggplot2)
+library(tibble)
+library(ggh4x)
+library(agricolae)
+library(emmeans)
+library(patchwork)
+library(readxl)
+
+# ==============================================================================
+# 1. Read data (from Fig4_data.xlsx, sheet "WN")
+# ==============================================================================
+xlsx_file <- "~/Desktop/codes/data/Fig4_data.xlsx"
+
+df <- read_excel(xlsx_file, sheet = "WN") %>%
+  as.data.frame()
+
+# 如果 Excel 第一列是行号索引（对应原 row.names = 1），改用：
+# df <- read_excel(xlsx_file, sheet = "WN") %>%
+#   column_to_rownames(var = names(.)[1])
+
+df <- df %>%
+  rename(paraments = paraments) %>%
+  mutate(
+    Water.Level = factor(Water.Level,
+                         levels = c("Conventional.watering", "Reduced.watering"),
+                         labels = c("CI", "RI")),
+    Fertilization = factor(Fertilization.Level,
+                           levels = c("N0", "N7", "N14", "N21", "N28")),
+    Year = factor(Year,
+                  levels = c("Wheat.2018", "Maize.2021", "Wheat.2022"),
+                  labels = c("Wheat 2018", "Maize 2021", "Wheat 2022")),
+    time = factor(time.point, levels = c("TP1", "TP2", "TP3", "TP4")),
+    paraments = factor(paraments, levels = c("pH", "Fe", "Mn", "Cu", "MRG", "ARG"))
+  ) %>%
+  filter(paraments %in% c("pH", "Fe", "Mn", "Cu", "MRG", "ARG")) %>%
+  filter(Year %in% c("Maize 2021", "Wheat 2022")) %>%
+  droplevels()
+
+cat("\n=========== Data check (keep only Maize 2021 + Wheat 2022) ===========\n")
+cat("Year levels: ", paste(levels(df$Year), collapse = ", "), "\n")
+cat("Number of facets per parameter = ",
+    n_distinct(interaction(df$Water.Level, df$Year, df$time)),
+    " (should be 2 x 2 x 4 = 16)\n")
+
+# ==============================================================================
+# 2. Tukey HSD via agricolae for plot letters
+# ==============================================================================
+sig_data <- df %>%
+  group_by(paraments, Water.Level, Year, time) %>%
+  group_modify(function(d, ...) {
+    if (n_distinct(d$Fertilization) < 2) {
+      return(tibble(Fertilization = unique(d$Fertilization), letter = NA_character_))
+    }
+    if (min(table(d$Fertilization)) < 2) {
+      return(tibble(Fertilization = unique(d$Fertilization), letter = NA_character_))
+    }
+    fit <- aov(concentration ~ Fertilization, data = d)
+    hsd <- HSD.test(fit, trt = "Fertilization", unbalanced = TRUE, console = FALSE)
+    res <- hsd$groups
+    res$Fertilization <- rownames(res)
+    tibble(
+      Fertilization = as.character(res$Fertilization),
+      letter = trimws(res$groups)
+    )
+  }) %>%
+  ungroup()
+
+# ==============================================================================
+# 3. Position of letter labels
+# ==============================================================================
+label_pos <- df %>%
+  group_by(paraments, Water.Level, Year, time, Fertilization) %>%
+  summarise(x_pos = max(concentration, na.rm = TRUE) * 1.05, .groups = "drop")
+
+plot_labels <- sig_data %>%
+  left_join(label_pos,
+            by = c("paraments", "Water.Level", "Year", "time", "Fertilization"))
+
+# ==============================================================================
+# 4. Color palette
+# ==============================================================================
+my_colors <- c(
+  "N0"  = "#6A9B3F",
+  "N7"  = "#8762B0",
+  "N14" = "#6C9FCC",
+  "N21" = "#C99C4B",
+  "N28" = "#CE4A3D"
+)
+
+bg_color_map <- c(
+  "pH"  = "#E6EEF6",   # 浅蓝
+  "Mn"  = "#E6EEF6",   # 浅蓝
+  "MRG" = "#E6EEF6",   # 浅蓝
+  "Fe"  = "#FBE7E7",   # 浅红
+  "Cu"  = "#FBE7E7",   # 浅红
+  "ARG" = "#FBE7E7"    # 浅红
+)
+
+# ==============================================================================
+# 5. Dunnett statistics
+# ==============================================================================
+dunnett_results <- df %>%
+  group_by(paraments, Water.Level, Year, time) %>%
+  group_modify(function(d, ...) {
+    if (!"N0" %in% as.character(d$Fertilization)) return(tibble())
+    if (n_distinct(d$Fertilization) < 2)          return(tibble())
+    if (min(table(d$Fertilization)) < 2)          return(tibble())
+    
+    fit <- aov(concentration ~ Fertilization, data = d)
+    emm <- emmeans(fit, ~ Fertilization)
+    ctr <- contrast(emm, "trt.vs.ctrl", ref = "N0", adjust = "dunnett")
+    ctr_df <- as.data.frame(ctr)
+    
+    tibble(
+      contrast = as.character(ctr_df$contrast),
+      estimate = ctr_df$estimate,
+      p.value  = ctr_df$p.value,
+      sig      = as.integer(ctr_df$p.value < 0.05)
+    )
+  }) %>%
+  ungroup() %>%
+  mutate(level_vs_N0 = sub(" - N0", "", contrast))
+
+summary_by_param_64 <- dunnett_results %>%
+  group_by(paraments) %>%
+  summarise(
+    n_sig   = sum(sig, na.rm = TRUE),
+    denom   = 64,
+    prop    = n_sig / denom,
+    pct_sig = sprintf("%.1f%%", 100 * prop),
+    pct_nonsig = sprintf("%.1f%%", 100 * (1 - prop)),
+    .groups = "drop"
+  ) %>%
+  arrange(match(paraments, c("pH","Fe","Mn","Cu","MRG","ARG")))
+
+cat("\n=========== Each parameter: significant count / 64 and percentage ===========\n")
+print(summary_by_param_64)
+
+nonsig_map <- setNames(summary_by_param_64$pct_nonsig,
+                       as.character(summary_by_param_64$paraments))
+
+# ==============================================================================
+# 6. Single parameter plotting function
+#    show_y_strips = TRUE  → 显示 Year/TP 的 y 方向分面标签（仅 ARG）
+#    show_y_strips = FALSE → 完全去掉 y 方向 strip（不留空间）
+# ==============================================================================
+make_param_plot <- function(param,
+                            show_legend   = FALSE,
+                            show_y_title  = FALSE,
+                            show_y_strips = FALSE) {
+  
+  df_sub  <- df          %>% filter(paraments == param)
+  lab_sub <- plot_labels %>% filter(paraments == param)
+  
+  bg_fill_color <- bg_color_map[[param]]
+  
+  # x 方向（CI / RI）条带始终显示
+  x_strip_bg <- list(
+    element_rect(fill = "white"),
+    element_rect(fill = "gray90")
+  )
+  x_strip_text <- element_text(face = "bold", size = 48, color = "black",
+                               margin = margin(t = 6, b = 6, l = 6, r = 6))
+  
+  # 根据 show_y_strips 决定 y 方向 strip 显 / 隐
+  if (show_y_strips) {
+    my_strip <- strip_nested(
+      background_x = x_strip_bg,
+      background_y = list(
+        element_rect(fill = "white"),
+        element_rect(fill = "gray90")
+      ),
+      text_x = x_strip_text,
+      text_y = element_text(face = "bold", size = 48, color = "black",
+                            margin = margin(t = 6, b = 6, l = 6, r = 6)),
+      by_layer_x = TRUE,
+      by_layer_y = TRUE
+    )
+  } else {
+    # ★ 直接 element_blank()，不占任何空间
+    my_strip <- strip_nested(
+      background_x = x_strip_bg,
+      background_y = element_blank(),
+      text_x       = x_strip_text,
+      text_y       = element_blank(),
+      by_layer_x   = TRUE,
+      by_layer_y   = TRUE
+    )
+  }
+  
+  base_lab <- switch(param,
+                     "pH"  = "Soil pH",
+                     "Fe"  = "Fe",
+                     "Mn"  = "Mn",
+                     "Cu"  = "Cu",
+                     "MRG" = "MRGs",
+                     "ARG" = "ARGs")
+  x_lab <- paste0(base_lab, " (", nonsig_map[[param]], ")")
+  
+  p <- ggplot(df_sub, aes(x = concentration, y = Fertilization, fill = Fertilization)) +
+    
+    geom_rect(
+      data        = data.frame(x = 1),
+      aes(xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf),
+      inherit.aes = FALSE,
+      fill        = bg_fill_color,
+      alpha       = 1
+    ) +
+    
+    geom_boxplot(width = 0.7, outlier.size = 1.2, alpha = 0.5, outlier.shape = NA) +
+    
+    geom_point(
+      aes(color = Fertilization),
+      position = position_jitter(width = 0, height = 0.2, seed = 123),
+      size = 5.5, alpha = 0.5, show.legend = FALSE
+    ) +
+    
+    geom_text(
+      data = lab_sub,
+      aes(x = x_pos, y = Fertilization, label = letter),
+      size = 8, fontface = "bold", hjust = 0,
+      na.rm = TRUE
+    ) +
+    
+    scale_y_discrete(limits = c("N0", "N7", "N14", "N21", "N28")) +
+    
+    scale_fill_manual(
+      values = my_colors,
+      name   = "N levels",
+      guide  = guide_legend(nrow = 1, byrow = TRUE)
+    ) +
+    scale_color_manual(values = my_colors, guide = "none") +
+    
+    facet_nested(
+      Year + time ~ Water.Level,
+      scales = "free_x",
+      strip  = my_strip
+    ) +
+    
+    labs(
+      y = "Nitrogen addition levels",
+      x = x_lab
+    ) +
+    
+    theme_bw(base_size = 22) +
+    theme(
+      axis.text.x  = element_text(size = 24, face = "bold", color = "black",
+                                  angle = 90, hjust = 1, vjust = 0.5),
+      axis.ticks.x = element_line(linewidth = 1),
+      axis.title.x = element_text(face = "bold", size = 42, color = "black",
+                                  margin = margin(t = 18)),
+      axis.text.y  = element_blank(),
+      axis.ticks.y = element_blank(),
+      axis.title.y = element_text(
+        face   = "bold",
+        size   = 42,
+        color  = if (show_y_title) "black" else "transparent",
+        margin = margin(r = 6)
+      ),
+      panel.grid      = element_blank(),
+      strip.text.x    = x_strip_text,
+      legend.position = if (show_legend) "bottom" else "none",
+      legend.title    = element_text(size = 42, face = "bold"),
+      legend.text     = element_text(size = 42, face = "bold"),
+      legend.key.size = unit(1.8, "cm"),
+      # ★ 顶部留白加大，给上移的 tag 字母留空间
+      plot.margin     = margin(t = 75, r = 1, b = 3, l = 1)
+    )
+  
+  return(p)
+}
+
+# ==============================================================================
+# 7. Generate six plots
+# ==============================================================================
+p_pH  <- make_param_plot("pH",  show_legend = FALSE, show_y_title = TRUE,  show_y_strips = FALSE)
+p_Fe  <- make_param_plot("Fe",  show_legend = FALSE, show_y_title = FALSE, show_y_strips = FALSE)
+p_Mn  <- make_param_plot("Mn",  show_legend = FALSE, show_y_title = FALSE, show_y_strips = FALSE)
+p_Cu  <- make_param_plot("Cu",  show_legend = FALSE, show_y_title = FALSE, show_y_strips = FALSE)
+p_MRG <- make_param_plot("MRG", show_legend = FALSE, show_y_title = FALSE, show_y_strips = FALSE)
+p_ARG <- make_param_plot("ARG", show_legend = TRUE,  show_y_title = FALSE, show_y_strips = TRUE)
+
+# ==============================================================================
+# 8. Combine plots
+# ==============================================================================
+p_all <- (p_pH | p_Fe | p_Mn | p_Cu | p_MRG | p_ARG) +
+  plot_layout(
+    guides = "collect",
+    widths = rep(1, 6)
+  ) +
+  plot_annotation(
+    tag_levels = list(c("m", "n", "o", "p", "q", "r"))
+  )
+p_all <- p_all &
+  theme(
+    # ★ 关键修复：y = 1.0 保持原位，vjust = 0 让文字向上延伸（进入顶部边距）
+    plot.tag          = element_text(face = "bold", size = 48, color = "black",
+                                     hjust = 0, vjust = 0),
+    plot.tag.position = c(0, 1.0),
+    panel.spacing.x   = unit(0.02, "cm"),
+    panel.spacing.y   = unit(0.02, "cm"),
+    legend.position   = "bottom",
+    legend.direction  = "horizontal",
+    legend.box        = "horizontal",
+    legend.title      = element_text(size = 42, face = "bold",
+                                     margin = margin(r = 16)),
+    legend.text       = element_text(size = 42, face = "bold"),
+    legend.key.size   = unit(1.8, "cm"),
+    legend.margin     = margin(t = 6, b = 6)
+  )
+print(p_all)
+
+# ==============================================================================
+# 9. Save figure
+# ==============================================================================
+ggsave("~/Desktop/codes/figures/Fig4m-p.pdf", p_all,
+       width = 44, height = 36, dpi = 300)
+```
+

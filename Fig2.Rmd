@@ -1,0 +1,1066 @@
+---
+title: "Fig2"
+output: html_document
+date: "2026-10-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars,fig.height=8,fig.width=20}
+setwd("~/Desktop/codes")
+rm(list = ls())
+library(ggplot2)
+library(dplyr)
+library(rstatix)
+library(patchwork)
+library(readxl)
+library(ggtext)     # ← 用于渲染 HTML 富文本（粗体 + 斜体）
+
+# ====================== Read data ======================
+da_raw <- read_excel("~/Desktop/codes/data/Fig2_data.xlsx", sheet = "A")
+
+# Modify treatment groups: Acidified / Non-acidified -> Acid added / Control
+da_raw <- da_raw %>%
+  filter(treatment %in% c("Acidified", "Non-acidified")) %>%
+  mutate(treatment = factor(treatment,
+                            levels = c("Non-acidified", "Acidified"),
+                            labels = c("Control", "Acid added")))
+
+# ---- Colors: purple & blue ----
+group_colors <- c("#B07AA1", "#6BAED6")  # purple (Control), blue (Acid added)
+
+# ====================== General plotting function (two-sided Welch's t-test) ======================
+make_boxplot <- function(data, yvar, ylab) {
+  
+  # ---------- Two-sided Welch's t-test (unequal variance) ----------
+  cat(sprintf("\n########## %s - two-sided Welch's t-test (var.equal = FALSE) ##########\n", yvar))
+  fml <- as.formula(paste(yvar, "~ treatment"))
+  
+  diff_test <- data %>%
+    t_test(fml, var.equal = FALSE, alternative = "two.sided")
+  
+  cat(sprintf("\n=== %s test result ===\n", yvar))
+  print(diff_test)
+  
+  # ---------- Generate HTML labels ----------
+  #   - t and p: bold italic  -> <b><i>...</i></b>
+  #   - =, numbers, comma: bold upright (inside <b> but outside <i>)
+  #   - p < 0.001: scientific notation (1 decimal); otherwise 3 decimals
+  diff_test <- diff_test %>%
+    mutate(
+      label = ifelse(
+        p < 0.001,
+        sprintf("<b><i>t</i> = %.2f, <i>p</i> = %.1e</b>", statistic, p),
+        sprintf("<b><i>t</i> = %.2f, <i>p</i> = %.3f</b>", statistic, p)
+      ),
+      x_pos = 1.5,
+      y_pos = max(data[[yvar]], na.rm = TRUE) * 1.05
+    )
+  
+  # ---------- Plot ----------
+  p <- ggplot(data, aes(x = treatment, y = .data[[yvar]], fill = treatment)) +
+    geom_boxplot(width = 0.5, alpha = 0.5, size = 0.5, outlier.shape = NA) +
+    geom_jitter(
+      aes(color = treatment),
+      position = position_jitter(width = 0.15),
+      size = 12, alpha = 0.5,
+      show.legend = FALSE
+    ) +
+    scale_color_manual(values = group_colors) +
+    scale_fill_manual(values = group_colors) +
+    # HTML-rendered label: t and p bold italic; rest bold upright
+    geom_richtext(
+      data = diff_test,
+      aes(x = x_pos, y = y_pos, label = label),
+      size = 9,
+      fill = NA, label.color = NA, label.padding = unit(0, "pt"),
+      inherit.aes = FALSE
+    ) +
+    labs(x = "", y = ylab) +
+    theme_bw() +
+    theme(
+      legend.position = "none",
+      axis.text.x = element_text(colour = "black", size = 28, face = "bold"),
+      axis.text.y = element_text(colour = "black", size = 18, face = "bold"),
+      axis.title.x = element_text(colour = "black", size = 26, face = "bold"),
+      axis.title.y = element_text(colour = "black", size = 26, face = "bold", angle = 90),
+      axis.ticks.y = element_line(color = "black", size = 1),
+      panel.grid = element_blank(),
+      panel.border = element_rect(fill = NA, color = "black", size = 1.5)
+    )
+  return(p)
+}
+
+# ====================== Plot three figures separately (order: pH -> MRG -> ARG) ======================
+p_pH  <- make_boxplot(da_raw, "pH",  "Soil pH")
+
+p_MRG <- make_boxplot(da_raw, "MRG", "Relative abundance of MRGs (x/Gb)")
+p_ARG <- make_boxplot(da_raw, "ARG", "Relative abundance of ARGs (x/Gb)")
+
+# ====================== Combine three plots horizontally and save ======================
+p_all <- p_pH | p_MRG | p_ARG
+
+print(p_all)
+ggsave("~/Desktop/codes/figures/Fig2abc.pdf", plot = p_all,
+       width = 20, height = 8, dpi = 600,
+       device = cairo_pdf)
+```
+
+```{r,fig.height=5,fig.width=8}
+setwd("~/Desktop/codes")
+
+# ===== 0. Environment =====
+rm(list = ls())
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# ===== 1. Read data =====
+file  <- "~/Desktop/codes/data/Fig2_data.xlsx"
+abund <- read_excel(file, sheet = "A_MRG_abundance")
+meta  <- read_excel(file, sheet = "A_group")
+anno  <- read_excel(file, sheet = "A_MRG_ID")
+
+# ===== 2. Standardize column names =====
+colnames(abund)[1] <- "sample_id"
+colnames(meta)[1]  <- "sample_id"
+colnames(meta)[ncol(meta)] <- "treatment2"
+colnames(anno)[1] <- "gene_id"
+colnames(anno)[2] <- "MRG"
+
+# ===== 3. Wide-to-long on the abundance table =====
+abund_long <- abund %>%
+  pivot_longer(cols = -sample_id,
+               names_to  = "gene_id",
+               values_to = "abundance") %>%
+  mutate(
+    sample_id = as.character(sample_id),
+    gene_id   = sub("^X", "", as.character(gene_id)),
+    gene_id   = sub("\\.\\.\\..*$", "", gene_id),
+    abundance = as.numeric(abundance),
+    abundance = replace_na(abundance, 0)
+  ) %>%
+  group_by(sample_id, gene_id) %>%
+  summarise(abundance = sum(abundance, na.rm = TRUE),
+            .groups = "drop")
+
+# ===== 4. Clean annotation and treatment tables =====
+meta2 <- meta %>%
+  dplyr::select(sample_id, treatment2) %>%
+  mutate(sample_id  = as.character(sample_id),
+         treatment2 = as.character(treatment2)) %>%
+  filter(!is.na(treatment2)) %>%
+  distinct(sample_id, .keep_all = TRUE)
+
+anno2 <- anno %>%
+  dplyr::select(gene_id, MRG) %>%
+  mutate(gene_id = as.character(gene_id),
+         MRG     = as.character(MRG)) %>%
+  filter(!is.na(MRG), MRG != "") %>%
+  distinct(gene_id, .keep_all = TRUE)
+
+# ===== 5. Merge =====
+df <- abund_long %>%
+  left_join(anno2, by = "gene_id") %>%
+  left_join(meta2, by = "sample_id") %>%
+  filter(!is.na(treatment2)) %>%
+  mutate(MRG = replace_na(MRG, "Unclassified"))
+
+df$treatment2 <- factor(df$treatment2,
+                        levels = c("Non-acidified", "Acidified"))
+
+cat("Original total abundance:", sum(abund_long$abundance), "\n")
+cat("Merged total abundance:  ", sum(df$abundance), "\n")
+
+# ===== 6. Sum abundance by MRG within each sample =====
+df_sample_mrg <- df %>%
+  group_by(treatment2, sample_id, MRG) %>%
+  summarise(abundance = sum(abundance, na.rm = TRUE),
+            .groups = "drop")
+
+# Mean of each MRG per treatment
+bar_df <- df_sample_mrg %>%
+  group_by(treatment2, MRG) %>%
+  summarise(
+    mean = mean(abundance, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# ===== 7. Select MRGs to keep =====
+must_keep <- c("Iron", "Manganese", "Copper")
+
+mrg_rank <- bar_df %>%
+  group_by(MRG) %>%
+  summarise(mrg_total = sum(mean, na.rm = TRUE),
+            .groups = "drop") %>%
+  arrange(desc(mrg_total))
+
+top10    <- mrg_rank %>% slice_head(n = 10) %>% pull(MRG)
+keep_mrg <- union(top10, must_keep)
+
+cat("MRGs actually kept:\n")
+print(keep_mrg)
+cat("Number kept: ", length(keep_mrg), "\n")
+
+# ===== 7.1 Collapse the rest into "Others" =====
+bar_df <- bar_df %>%
+  mutate(MRG2 = ifelse(MRG %in% keep_mrg, MRG, "Others")) %>%
+  group_by(treatment2, MRG2) %>%
+  summarise(mean = sum(mean, na.rm = TRUE),
+            .groups = "drop") %>%
+  rename(MRG = MRG2)
+
+# ===== 7.2 Define top-to-bottom visual order = Top10 descending mean + Others last =====
+mrg_order_top_down <- bar_df %>%
+  group_by(MRG) %>%
+  summarise(mrg_total = sum(mean, na.rm = TRUE),
+            .groups = "drop") %>%
+  filter(MRG != "Others") %>%
+  arrange(desc(mrg_total)) %>%
+  pull(MRG)
+
+mrg_order_top_down <- c(mrg_order_top_down, "Others")
+
+# Bars stack bottom-up, so levels are set directly to the top-to-bottom order
+bar_df$MRG <- factor(bar_df$MRG, levels = mrg_order_top_down)
+
+# ===== 8. Fixed colors for 21 metals + Unclassified + Others =====
+col_all <- c(
+  "Aluminium"    = "#4E79A7",
+  "Antimony"     = "#F28E2B",
+  "Arsenic"      = "#59A14F",
+  "Cadmium"      = "#E15759",
+  "Chromium"     = "#B07AA1",
+  "Cobalt"       = "#9C755F",
+  "Copper"       = "#F0A12C",
+  "Gold"         = "#BAB0AC",
+  "Iron"         = "#B02226",
+  "Lead"         = "#FF9DA7",
+  "Magnesium"    = "#A0CBE8",
+  "Manganese"    = "#009E73",
+  "Mercury"      = "#8CD17D",
+  "Molybdenum"   = "#F1CE63",
+  "Nickel"       = "#D4A6C8",
+  "Selenium"     = "#D7B5A6",
+  "Silver"       = "#FABFD2",
+  "Tellurium"    = "#C9C9C9",
+  "Tungsten"     = "#B6992D",
+  "Vanadium"     = "#86BCB6",
+  "Zinc"         = "#A6A6A6",
+  "Unclassified" = "#E8E8E8",
+  "Others"       = "#D3D3D3"
+)
+
+col_use <- col_all[mrg_order_top_down]
+
+missing_col <- setdiff(mrg_order_top_down, names(col_use))
+if (length(missing_col) > 0) {
+  col_use <- c(col_use,
+               setNames(rep("#D3D3D3", length(missing_col)), missing_col))
+}
+
+# ===== 9. Plot =====
+# Element symbol mapping
+element_symbols <- c(
+  "Aluminium" = "Al",
+  "Antimony"  = "Sb",
+  "Arsenic"   = "As",
+  "Cadmium"   = "Cd",
+  "Chromium"  = "Cr",
+  "Cobalt"    = "Co",
+  "Copper"    = "Cu",
+  "Gold"      = "Au",
+  "Iron"      = "Fe",
+  "Lead"      = "Pb",
+  "Magnesium" = "Mg",
+  "Manganese" = "Mn",
+  "Mercury"   = "Hg",
+  "Molybdenum"= "Mo",
+  "Nickel"    = "Ni",
+  "Selenium"  = "Se",
+  "Silver"    = "Ag",
+  "Tellurium" = "Te",
+  "Tungsten"  = "W",
+  "Vanadium"  = "V",
+  "Zinc"      = "Zn"
+)
+
+# Legend label function: append symbol if the metal is in the map, otherwise return as-is
+label_with_symbol <- function(x) {
+  ifelse(x %in% names(element_symbols),
+         paste0(x, " (", element_symbols[x], ")"),
+         x)
+}
+
+# X-axis label mapping
+trt_labs <- c(
+  "Non-acidified" = "Control",
+  "Acidified"     = "Acid added"
+)
+
+p1 <- ggplot(bar_df, aes(x = treatment2, y = mean, fill = MRG)) +
+  # Narrower bars
+  geom_bar(stat = "identity", position = "stack",
+           width = 0.5, color = "black", linewidth = 0.2) +
+  # Reduce x-axis side padding so treatments appear closer
+  scale_x_discrete(labels = trt_labs, expand = expansion(add = 0.3)) +
+  labs(x = "", y = "Relative abundance of MRGs (x/Gb)", fill = "Metal(loid) class") +
+  scale_fill_manual(values = col_use,
+                    breaks = mrg_order_top_down,
+                    labels = label_with_symbol) +
+  guides(fill = guide_legend(ncol = 1)) +
+  theme_bw() +
+  theme(
+    text          = element_text(size = 12, family = "sans"),
+    # Larger legend text
+    legend.title  = element_text(colour = "black", size = 18, face = "bold"),
+    legend.text   = element_text(colour = "black", size = 18),
+    # y-axis text
+    axis.text.y   = element_text(colour = "black", size = 14, face = "bold"),
+    axis.title.y  = element_text(colour = "black", size = 16, face = "bold"),
+    # Larger x-axis text, horizontally centered
+    axis.text.x   = element_text(colour = "black", size = 18, face = "bold",
+                                 angle = 0, hjust = 0.5, vjust = 1),
+    axis.title.x  = element_text(colour = "black", size = 18, face = "bold"),
+    panel.grid    = element_blank(),
+    panel.border  = element_rect(fill = NA, color = "black",
+                                 linewidth = 1, linetype = "solid")
+  )
+print(p1)
+
+# ===== 10. Save =====
+ggsave("~/Desktop/codes/figures/Fig2d.pdf", p1,
+       width = 8, height = 5, dpi = 600)
+```
+
+```{r,fig.height=5,fig.width=8}
+setwd("~/Desktop/codes")
+
+# ===== 0. Environment =====
+rm(list = ls())
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(stringr)   # for wrapping legend labels
+
+# ===== 1. Read data =====
+file  <- "~/Desktop/codes/data/Fig2_data.xlsx"
+abund <- read_excel(file, sheet = "A_ARG_abundance")
+meta  <- read_excel(file, sheet = "A_group")
+anno  <- read_excel(file, sheet = "A_ARG_ID")
+
+# ===== 2. Standardize column names =====
+colnames(abund)[1] <- "sample_id"
+colnames(meta)[1]  <- "sample_id"
+colnames(meta)[ncol(meta)] <- "treatment2"
+colnames(anno)[1] <- "gene_id"
+colnames(anno)[4] <- "ARG"
+
+# ===== 3. Wide-to-long on the abundance table =====
+abund_long <- abund %>%
+  pivot_longer(cols = -sample_id,
+               names_to  = "gene_id",
+               values_to = "abundance") %>%
+  mutate(
+    sample_id = as.character(sample_id),
+    gene_id   = sub("^X", "", as.character(gene_id)),
+    gene_id   = sub("\\.\\.\\..*$", "", gene_id),
+    abundance = as.numeric(abundance),
+    abundance = replace_na(abundance, 0)
+  ) %>%
+  group_by(sample_id, gene_id) %>%
+  summarise(abundance = sum(abundance, na.rm = TRUE),
+            .groups = "drop")
+
+# ===== 4. Clean annotation and treatment tables =====
+meta2 <- meta %>%
+  dplyr::select(sample_id, treatment2) %>%
+  mutate(sample_id  = as.character(sample_id),
+         treatment2 = as.character(treatment2)) %>%
+  filter(!is.na(treatment2)) %>%
+  distinct(sample_id, .keep_all = TRUE)
+
+anno2 <- anno %>%
+  dplyr::select(gene_id, ARG) %>%
+  mutate(gene_id = as.character(gene_id),
+         ARG     = as.character(ARG)) %>%
+  filter(!is.na(ARG), ARG != "") %>%
+  distinct(gene_id, .keep_all = TRUE)
+
+# ===== 5. Merge =====
+df <- abund_long %>%
+  left_join(anno2, by = "gene_id") %>%
+  left_join(meta2, by = "sample_id") %>%
+  filter(!is.na(treatment2)) %>%
+  mutate(ARG = replace_na(ARG, "Unclassified"))
+
+df$treatment2 <- factor(df$treatment2,
+                        levels = c("Non-acidified", "Acidified"))
+
+cat("Original total abundance:", sum(abund_long$abundance), "\n")
+cat("Merged total abundance:  ", sum(df$abundance), "\n")
+
+# ===== 6. Sum abundance by ARG type within each sample =====
+df_sample_arg <- df %>%
+  group_by(treatment2, sample_id, ARG) %>%
+  summarise(abundance = sum(abundance, na.rm = TRUE),
+            .groups = "drop")
+
+bar_df <- df_sample_arg %>%
+  group_by(treatment2, ARG) %>%
+  summarise(
+    mean = mean(abundance, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# ===== 6.1 Rank by total abundance to find the top 5 =====
+arg_rank <- bar_df %>%
+  group_by(ARG) %>%
+  summarise(arg_total = sum(mean, na.rm = TRUE),
+            .groups = "drop") %>%
+  arrange(desc(arg_total))
+
+top5 <- arg_rank %>% slice_head(n = 5) %>% pull(ARG)
+
+cat("Top 5 ARG classes by abundance:\n")
+print(top5)
+
+# ===== 6.2 Collapse the rest into "Others" =====
+bar_df <- bar_df %>%
+  mutate(ARG2 = ifelse(ARG %in% top5, ARG, "Others")) %>%
+  group_by(treatment2, ARG2) %>%
+  summarise(mean = sum(mean, na.rm = TRUE),
+            .groups = "drop") %>%
+  rename(ARG = ARG2)
+
+# ===== 6.3 Define stacking order = Top5 descending + Others last =====
+arg_order <- bar_df %>%
+  group_by(ARG) %>%
+  summarise(arg_total = sum(mean, na.rm = TRUE),
+            .groups = "drop") %>%
+  filter(ARG != "Others") %>%
+  arrange(desc(arg_total)) %>%
+  pull(ARG)
+
+arg_order <- c(arg_order, "Others")
+
+bar_df$ARG <- factor(bar_df$ARG, levels = arg_order)
+
+# ===== 7. Color definitions =====
+col_use <- c(
+  "Multidrug"               = "#D65190",
+  "Glycopeptide"            = "#F38B2F",
+  "Rifamycin"               = "#F2E851",
+  "Tetracycline"            = "#088C00",
+  "Fluoroquinolone"         = "#025939",
+  "Beta-lactam"             = "#214EA7",
+  "Aminoglycoside"          = "#7552A7",
+  "Chloramphenicol"         = "#DB6C76",
+  "MLS"                     = "#8B511F",
+  "Phosphonic acid"         = "#A38277",
+  "Elfamycin"               = "#592E13",
+  "Isoniazid-like"          = "#6E86A5",
+  "Nitroimidazole"          = "#03C08B",
+  "Diaminopyrimidine"       = "#DCA0DD",
+  "Disinfecting agents and antiseptics" = "#BF7533",
+  "Others"                  = "#D3D3D3"
+)
+
+# Keep only colors for ARGs actually present to avoid missing entries
+col_use <- col_use[arg_order]
+missing_col <- setdiff(arg_order, names(col_use))
+if (length(missing_col) > 0) {
+  col_use <- c(col_use,
+               setNames(rep("#D3D3D3", length(missing_col)), missing_col))
+}
+
+# ===== 8. Plot =====
+trt_labs <- c(
+  "Non-acidified" = "Control",
+  "Acidified"     = "Acid added"
+)
+
+p1 <- ggplot(bar_df, aes(x = treatment2, y = mean, fill = ARG)) +
+  # Bar width matches the first script: 0.5
+  geom_bar(stat = "identity", position = "stack",
+           width = 0.5, color = "black", linewidth = 0.2) +
+  # Add expand so the spacing between treatments matches the first script
+  scale_x_discrete(labels = trt_labs, expand = expansion(add = 0.3)) +
+  # Legend title set to Drug class
+  labs(x = "", y = "Relative abundance of ARGs (x/Gb)", fill = "Drug class") +
+  scale_fill_manual(
+    values = col_use,
+    breaks = arg_order,
+    labels = function(x) str_wrap(x, width = 22)
+  ) +
+  guides(fill = guide_legend(ncol = 1)) +
+  theme_bw() +
+  theme(
+    text          = element_text(size = 12, family = "sans"),
+    # Legend text matches the first script
+    legend.title  = element_text(colour = "black", size = 18, face = "bold"),
+    legend.text   = element_text(colour = "black", size = 18),
+    # y-axis text matches the first script
+    axis.text.y   = element_text(colour = "black", size = 14, face = "bold"),
+    axis.title.y  = element_text(colour = "black", size = 16, face = "bold"),
+    # x-axis text matches the first script: horizontally centered
+    axis.text.x   = element_text(colour = "black", size = 18, face = "bold",
+                                 angle = 0, hjust = 0.5, vjust = 1),
+    axis.title.x  = element_text(colour = "black", size = 18, face = "bold"),
+    panel.grid    = element_blank(),
+    panel.border  = element_rect(fill = NA, color = "black",
+                                 linewidth = 1, linetype = "solid")
+  )
+print(p1)
+
+# ===== 9. Save =====
+ggsave("~/Desktop/codes/figures/Fig2e.pdf", p1,
+       width = 8, height = 5, dpi = 600)
+```
+
+```{r,,fig.height=4,fig.width=12}
+rm(list = ls())
+setwd("~/Desktop/codes")
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(ggthemes)
+library(ggtext)
+
+plot_data1 <- read_excel("~/Desktop/codes/data/Fig2_data.xlsx", sheet = "Lime")
+plot_data1[is.na(plot_data1)] <- ""
+
+plot_data1 <- plot_data1 %>% filter(group %in% c("PH", "MRG", "ARG"))
+
+plot_data1$Subgroup <- dplyr::recode(plot_data1$Subgroup,
+                                     "Limed"   = "Lime added",
+                                     "Unlimed" = "Lime unadded")
+
+custom_colors <- c("Lime unadded" = "#D55535",
+                   "Lime added"   = "#2A77AC")
+
+plot_data <- plot_data1
+plot_data$significant <- ifelse(plot_data$pval < 0.05, "Significant", "Non-significant")
+plot_data$fill_color  <- ifelse(plot_data$significant == "Significant",
+                                custom_colors[plot_data$Subgroup],
+                                "white")
+plot_data$point_shape <- ifelse(plot_data$significant == "Significant", 16, 21)
+
+plot_data$Subgroup <- factor(plot_data$Subgroup, levels = c("Lime added", "Lime unadded"))
+plot_data$group <- factor(plot_data$group, levels = c("PH", "MRG", "ARG"))
+plot_data$group <- factor(plot_data$group, labels = c("Soil pH", "MRGs", "ARGs"))
+
+annotation_data <- plot_data %>%
+  group_by(group, Subgroup) %>%
+  summarise(
+    estimate = mean(estimate, na.rm = TRUE),
+    pval     = first(pval),
+    .groups  = "drop"
+  ) %>%
+  mutate(
+    p_label = case_when(
+      pval < 0.001 ~ paste0("<b><i>p</i> = ",
+                            format(pval, digits = 2, scientific = TRUE),
+                            "</b>"),
+      TRUE         ~ paste0("<b><i>p</i> = ",
+                            signif(pval, 3),
+                            "</b>")
+    ),
+    # Set label x position offsets based on group and treatment
+    label_x = case_when(
+      group == "Soil pH" & Subgroup == "Lime unadded" ~ estimate + 0.15,
+      group == "MRGs"    & Subgroup == "Lime unadded" ~ estimate - 0.15,
+      group == "ARGs"    & Subgroup == "Lime unadded" ~ estimate - 0.15,
+      group == "ARGs"    & Subgroup == "Lime added"   ~ estimate + 0.15,
+      TRUE ~ estimate
+    ),
+    # Match label color with treatment
+    label_color = custom_colors[as.character(Subgroup)]
+  )
+
+p <- ggplot(plot_data, aes(x = estimate, y = Subgroup)) +
+  facet_wrap(.~group, ncol = 3) +
+  geom_errorbarh(aes(xmax = estimate + 1.96 * se,
+                     xmin = estimate - 1.96 * se,
+                     color = Subgroup,
+                     linetype = "95% CI"),
+                 size = 1.5, height = 0, alpha = 0.5) +
+  geom_errorbarh(aes(xmax = estimate + se,
+                     xmin = estimate - se,
+                     color = Subgroup,
+                     linetype = "±SE"),
+                 size = 2.5, height = 0, alpha = 0.5) +
+  geom_point(aes(fill = fill_color, color = Subgroup, shape = significant),
+             size = 7, stroke = 1, alpha = 0.5) +
+  # Use label_x and label_color
+  geom_richtext(data = annotation_data,
+                aes(x = label_x, y = Subgroup, label = p_label),
+                color = annotation_data$label_color,
+                hjust = 0.2, vjust = -1.2, size = 5,
+                fill = NA, label.color = NA, label.padding = unit(0, "pt")) +
+  scale_color_manual(values = custom_colors,
+                     breaks = c("Lime unadded", "Lime added"),
+                     name   = "Treatment") +
+  scale_fill_identity() +
+  scale_shape_manual(name = "Significance",
+                     values = c("Significant" = 16, "Non-significant" = 21),
+                     labels = c("Significant"     = "<i>p</i> < 0.05",
+                                "Non-significant" = "<i>p</i> > 0.05")) +
+  scale_linetype_manual(name = "Error bars",
+                        values = c("95% CI" = "solid", "±SE" = "solid"),
+                        guide = guide_legend(override.aes = list(
+                          size  = c(1.5, 2.5),
+                          alpha = c(0.4, 0.7),
+                          color = "black"))) +
+  # Modify y-axis tick labels with line breaks and standard parentheses
+  scale_y_discrete(
+    labels = c(
+      "Lime added"   = "Lime added\n(N+L vs L)",
+      "Lime unadded" = "Lime unadded\n(N vs Control)"
+    )
+  ) +
+  geom_vline(xintercept = 0, color = "gray", linetype = "dashed", size = 1.5) +
+  # Modify x-axis title
+  labs(x = 'Effect size of nitrogen additon (log response ratio)',
+       y = '',
+       title = " ") +
+  theme_few() +
+  theme(
+    axis.text = element_text(size = 12, color = "black", face = "bold"),
+    axis.text.y = element_text(lineheight = 1.2), # Adjust line spacing for y-axis labels
+    title = element_text(size = 12),
+    legend.position = "right",
+    legend.title = element_text(size = 11),
+    legend.text  = element_markdown(size = 12),
+    axis.title.x = element_text(size = 14, face = "bold"),
+    legend.key = element_rect(fill = "white"),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    strip.text = element_text(size = 12, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5, size = 10)
+  ) +
+  theme(panel.border = element_rect(fill = NA, color = "black",
+                                    size = 1.5, linetype = "solid"))
+
+p
+ggsave("~/Desktop/codes/figures/Fig2fgh.pdf", width = 12, height = 4,
+       device = cairo_pdf)
+```
+
+```{r,fig.height=5,fig.width=8}
+setwd("~/Desktop/codes")
+
+# ===== 0. Environment =====
+rm(list = ls())
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# ===== 1. Read data =====
+file  <- "~/Desktop/codes/data/Fig2_data.xlsx"
+abund <- read_excel(file, sheet = "L_MRG_abundance")
+meta  <- read_excel(file, sheet = "L_group")
+anno  <- read_excel(file, sheet = "L_MRG_ID")
+
+# ===== 2. Standardize column names =====
+colnames(abund)[1] <- "sample_id"
+colnames(meta)[1]  <- "sample_id"
+colnames(meta)[ncol(meta)] <- "treatment2"
+colnames(anno)[1] <- "gene_id"
+colnames(anno)[2] <- "MRG"
+
+# ===== 3. Wide-to-long on the abundance table =====
+abund_long <- abund %>%
+  pivot_longer(cols = -sample_id,
+               names_to  = "gene_id",
+               values_to = "abundance") %>%
+  mutate(
+    sample_id = as.character(sample_id),
+    gene_id   = sub("^X", "", as.character(gene_id)),
+    gene_id   = sub("\\.\\.\\..*$", "", gene_id),
+    abundance = as.numeric(abundance),
+    abundance = replace_na(abundance, 0)
+  ) %>%
+  group_by(sample_id, gene_id) %>%
+  summarise(abundance = sum(abundance, na.rm = TRUE),
+            .groups = "drop")
+
+# ===== 4. Clean annotation and treatment tables =====
+meta2 <- meta %>%
+  dplyr::select(sample_id, treatment2) %>%
+  mutate(sample_id  = as.character(sample_id),
+         treatment2 = as.character(treatment2)) %>%
+  filter(!is.na(treatment2)) %>%
+  distinct(sample_id, .keep_all = TRUE)
+
+anno2 <- anno %>%
+  dplyr::select(gene_id, MRG) %>%
+  mutate(gene_id = as.character(gene_id),
+         MRG     = as.character(MRG)) %>%
+  filter(!is.na(MRG), MRG != "") %>%
+  distinct(gene_id, .keep_all = TRUE)
+
+# ===== 5. Merge =====
+df <- abund_long %>%
+  left_join(anno2, by = "gene_id") %>%
+  left_join(meta2, by = "sample_id") %>%
+  filter(!is.na(treatment2)) %>%
+  mutate(MRG = replace_na(MRG, "Unclassified"))
+
+# ---- Map directly to Control / N / L / N+L ----
+df$treatment2 <- factor(df$treatment2,
+                        levels = c("N0-L0", "N20-L0",
+                                   "N0-L45", "N20-L45"),
+                        labels = c("Control", "N", "L", "N+L"))
+
+cat("Original total abundance:", sum(abund_long$abundance), "\n")
+cat("Merged total abundance:  ", sum(df$abundance), "\n")
+print(table(df$treatment2))
+
+# ===== 6. Sum abundance by MRG within each sample =====
+df_sample_mrg <- df %>%
+  group_by(treatment2, sample_id, MRG) %>%
+  summarise(abundance = sum(abundance, na.rm = TRUE),
+            .groups = "drop")
+
+# Mean of each MRG per treatment
+bar_df <- df_sample_mrg %>%
+  group_by(treatment2, MRG) %>%
+  summarise(
+    mean = mean(abundance, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# ===== 7. Select MRGs to keep =====
+must_keep <- c("Iron", "Manganese", "Copper")
+
+mrg_rank <- bar_df %>%
+  group_by(MRG) %>%
+  summarise(mrg_total = sum(mean, na.rm = TRUE),
+            .groups = "drop") %>%
+  arrange(desc(mrg_total))
+
+top10    <- mrg_rank %>% slice_head(n = 10) %>% pull(MRG)
+keep_mrg <- union(top10, must_keep)
+
+cat("MRGs actually kept:\n")
+print(keep_mrg)
+cat("Number kept: ", length(keep_mrg), "\n")
+
+# ===== 7.1 Collapse the rest into "Others" =====
+bar_df <- bar_df %>%
+  mutate(MRG2 = ifelse(MRG %in% keep_mrg, MRG, "Others")) %>%
+  group_by(treatment2, MRG2) %>%
+  summarise(mean = sum(mean, na.rm = TRUE),
+            .groups = "drop") %>%
+  rename(MRG = MRG2)
+
+# ===== 7.2 Define top-to-bottom visual order = Top10 descending mean + Others last =====
+mrg_order_top_down <- bar_df %>%
+  group_by(MRG) %>%
+  summarise(mrg_total = sum(mean, na.rm = TRUE),
+            .groups = "drop") %>%
+  filter(MRG != "Others") %>%
+  arrange(desc(mrg_total)) %>%
+  pull(MRG)
+
+mrg_order_top_down <- c(mrg_order_top_down, "Others")
+
+# Bars stack bottom-up, so levels are set directly to the top-to-bottom order
+bar_df$MRG <- factor(bar_df$MRG, levels = mrg_order_top_down)
+
+# ===== 8. Fixed colors for 21 metals + Unclassified + Others =====
+col_all <- c(
+  "Aluminium"    = "#4E79A7",
+  "Antimony"     = "#F28E2B",
+  "Arsenic"      = "#59A14F",
+  "Cadmium"      = "#E15759",
+  "Chromium"     = "#B07AA1",
+  "Cobalt"       = "#9C755F",
+  "Copper"       = "#F0A12C",   # orange-yellow
+  "Gold"         = "#BAB0AC",
+  "Iron"         = "#B02226",   # dark red
+  "Lead"         = "#FF9DA7",
+  "Magnesium"    = "#A0CBE8",
+  "Manganese"    = "#009E73",   # teal
+  "Mercury"      = "#8CD17D",
+  "Molybdenum"   = "#F1CE63",
+  "Nickel"       = "#D4A6C8",
+  "Selenium"     = "#D7B5A6",
+  "Silver"       = "#FABFD2",
+  "Tellurium"    = "#C9C9C9",
+  "Tungsten"     = "#B6992D",
+  "Vanadium"     = "#86BCB6",
+  "Zinc"         = "#A6A6A6",
+  "Unclassified" = "#E8E8E8",
+  "Others"       = "#D3D3D3"
+)
+
+# Extract colors in top-to-bottom order (for the legend)
+col_use <- col_all[mrg_order_top_down]
+
+# Fallback: assign gray for any MRG not found in col_all
+missing_col <- setdiff(mrg_order_top_down, names(col_use))
+if (length(missing_col) > 0) {
+  col_use <- c(col_use,
+               setNames(rep("#D3D3D3", length(missing_col)), missing_col))
+}
+
+# ===== 9. Plot =====
+# Element symbol mapping
+element_symbols <- c(
+  "Aluminium" = "Al",
+  "Antimony"  = "Sb",
+  "Arsenic"   = "As",
+  "Cadmium"   = "Cd",
+  "Chromium"  = "Cr",
+  "Cobalt"    = "Co",
+  "Copper"    = "Cu",
+  "Gold"      = "Au",
+  "Iron"      = "Fe",
+  "Lead"      = "Pb",
+  "Magnesium" = "Mg",
+  "Manganese" = "Mn",
+  "Mercury"   = "Hg",
+  "Molybdenum"= "Mo",
+  "Nickel"    = "Ni",
+  "Selenium"  = "Se",
+  "Silver"    = "Ag",
+  "Tellurium" = "Te",
+  "Tungsten"  = "W",
+  "Vanadium"  = "V",
+  "Zinc"      = "Zn"
+)
+
+# Legend label function: append symbol if the metal is in the map, otherwise return as-is
+label_with_symbol <- function(x) {
+  ifelse(x %in% names(element_symbols),
+         paste0(x, " (", element_symbols[x], ")"),
+         x)
+}
+
+p1 <- ggplot(bar_df, aes(x = treatment2, y = mean, fill = MRG)) +
+  # Narrower bars
+  geom_bar(stat = "identity", position = "stack",
+           width = 0.5, color = "black", linewidth = 0.2) +
+  # Reduce x-axis side padding so treatments appear closer
+  scale_x_discrete(expand = expansion(add = 0.3)) +
+  labs(x = "", y = "Relative abundance of MRGs (x/Gb)", fill = "Metal(loid) class") +
+  scale_fill_manual(values = col_use,
+                    breaks = mrg_order_top_down,
+                    labels = label_with_symbol) +
+  guides(fill = guide_legend(ncol = 1)) +
+  theme_bw() +
+  theme(
+    text          = element_text(size = 12, family = "sans"),
+    legend.title  = element_text(colour = "black", size = 18, face = "bold"),
+    legend.text   = element_text(colour = "black", size = 18),
+    axis.text.y   = element_text(colour = "black", size = 14, face = "bold"),
+    axis.title.y  = element_text(colour = "black", size = 16, face = "bold"),
+    # ---- x-axis text unrotated, horizontally centered under bars ----
+    axis.text.x   = element_text(colour = "black", size = 18, face = "bold",
+                                 angle = 0, hjust = 0.5, vjust = 1),
+    axis.title.x  = element_text(colour = "black", size = 18, face = "bold"),
+    panel.grid    = element_blank(),
+    panel.border  = element_rect(fill = NA, color = "black",
+                                 linewidth = 1, linetype = "solid")
+  )
+print(p1)
+
+# ===== 10. Save =====
+ggsave("~/Desktop/codes/figures/Fig2i.pdf", p1,
+       width = 8, height = 5, dpi = 600)
+```
+
+```{r,fig.height=5,fig.width=8}
+setwd("~/Desktop/codes")
+
+# ===== 0. Environment =====
+rm(list = ls())
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(stringr)   # for wrapping legend labels
+
+# ===== 1. Read data =====
+file  <- "~/Desktop/codes/data/Fig2_data.xlsx"
+abund <- read_excel(file, sheet = "L_ARG_abundance")
+meta  <- read_excel(file, sheet = "L_group")
+anno  <- read_excel(file, sheet = "L_ARG_ID")
+
+# ===== 2. Standardize column names =====
+colnames(abund)[1] <- "sample_id"
+colnames(meta)[1]  <- "sample_id"
+colnames(meta)[ncol(meta)] <- "treatment2"
+colnames(anno)[1] <- "gene_id"
+colnames(anno)[4] <- "ARG"
+
+# ===== 3. Wide-to-long on the abundance table =====
+abund_long <- abund %>%
+  pivot_longer(cols = -sample_id,
+               names_to  = "gene_id",
+               values_to = "abundance") %>%
+  mutate(
+    sample_id = as.character(sample_id),
+    gene_id   = sub("^X", "", as.character(gene_id)),
+    gene_id   = sub("\\.\\.\\..*$", "", gene_id),
+    abundance = as.numeric(abundance),
+    abundance = replace_na(abundance, 0)
+  ) %>%
+  group_by(sample_id, gene_id) %>%
+  summarise(abundance = sum(abundance, na.rm = TRUE),
+            .groups = "drop")
+
+# ===== 4. Clean annotation and treatment tables =====
+meta2 <- meta %>%
+  dplyr::select(sample_id, treatment2) %>%
+  mutate(sample_id  = as.character(sample_id),
+         treatment2 = as.character(treatment2)) %>%
+  filter(!is.na(treatment2)) %>%
+  distinct(sample_id, .keep_all = TRUE)
+
+anno2 <- anno %>%
+  dplyr::select(gene_id, ARG) %>%
+  mutate(gene_id = as.character(gene_id),
+         ARG     = as.character(ARG)) %>%
+  filter(!is.na(ARG), ARG != "") %>%
+  distinct(gene_id, .keep_all = TRUE)
+
+# ===== 5. Merge =====
+df <- abund_long %>%
+  left_join(anno2, by = "gene_id") %>%
+  left_join(meta2, by = "sample_id") %>%
+  filter(!is.na(treatment2)) %>%
+  mutate(ARG = replace_na(ARG, "Unclassified"))
+
+# ---- Map x-axis labels to Control / N / L / N+L ----
+df$treatment2 <- factor(df$treatment2,
+                        levels = c("N0-L0", "N20-L0",
+                                   "N0-L45", "N20-L45"),
+                        labels = c("Control", "N", "L", "N+L"))
+
+cat("Original total abundance:", sum(abund_long$abundance), "\n")
+cat("Merged total abundance:  ", sum(df$abundance), "\n")
+print(table(df$treatment2))
+
+# ===== 6. Sum abundance by ARG type within each sample =====
+df_sample_arg <- df %>%
+  group_by(treatment2, sample_id, ARG) %>%
+  summarise(abundance = sum(abundance, na.rm = TRUE),
+            .groups = "drop")
+
+# Mean of each ARG per treatment
+bar_df <- df_sample_arg %>%
+  group_by(treatment2, ARG) %>%
+  summarise(
+    mean = mean(abundance, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# ===== 6.1 Keep only the top 5 ARGs by abundance; collapse the rest into "Others" =====
+arg_rank <- bar_df %>%
+  group_by(ARG) %>%
+  summarise(arg_total = sum(mean, na.rm = TRUE),
+            .groups = "drop") %>%
+  arrange(desc(arg_total))
+
+top5_arg <- arg_rank %>% slice_head(n = 5) %>% pull(ARG)
+
+bar_df <- bar_df %>%
+  mutate(ARG2 = ifelse(ARG %in% top5_arg, ARG, "Others")) %>%
+  group_by(treatment2, ARG2) %>%
+  summarise(mean = sum(mean, na.rm = TRUE),
+            .groups = "drop") %>%
+  rename(ARG = ARG2)
+
+# ===== 6.2 Define stacking order: Top5 descending mean + Others last =====
+arg_order_top_down <- bar_df %>%
+  group_by(ARG) %>%
+  summarise(arg_total = sum(mean, na.rm = TRUE),
+            .groups = "drop") %>%
+  filter(ARG != "Others") %>%
+  arrange(desc(arg_total)) %>%
+  pull(ARG)
+
+arg_order_top_down <- c(arg_order_top_down, "Others")
+
+bar_df$ARG <- factor(bar_df$ARG, levels = arg_order_top_down)
+
+# ===== 7. Color definitions =====
+col16 <- c(
+  "Multidrug"               = "#D65190",
+  "Glycopeptide"            = "#F38B2F",
+  "Rifamycin"               = "#F2E851",
+  "Tetracycline"            = "#088C00",
+  "Fluoroquinolone"         = "#025939",
+  "Beta-lactam"             = "#214EA7",
+  "Aminoglycoside"          = "#7552A7",
+  "Chloramphenicol"         = "#DB6C76",
+  "MLS"                     = "#8B511F",
+  "Phosphonic acid"         = "#A38277",
+  "Elfamycin"               = "#592E13",
+  "Isoniazid-like"          = "#6E86A5",
+  "Nitroimidazole"          = "#03C08B",
+  "Diaminopyrimidine"       = "#DCA0DD",
+  "Disinfecting agents and antiseptics" = "#BF7533",
+  "Unclassified"            = "#D3D3D3"
+)
+
+# Extract colors in stacking order: Top5 from col16, Others uses gray
+col_use <- c()
+for (arg in arg_order_top_down) {
+  if (arg == "Others") {
+    col_use[arg] <- "#D3D3D3"
+  } else if (arg %in% names(col16)) {
+    col_use[arg] <- col16[arg]
+  } else {
+    col_use[arg] <- "#D3D3D3"  # fallback
+  }
+}
+
+# ===== 8. Plot =====
+p1 <- ggplot(bar_df, aes(x = treatment2, y = mean, fill = ARG)) +
+  geom_bar(stat = "identity", position = "stack",
+           width = 0.5, color = "black", linewidth = 0.2) +
+  scale_x_discrete(expand = expansion(add = 0.3)) +
+  # ---- Legend title set to Drug class ----
+labs(x = "", y = "Relative abundance of ARGs (x/Gb)", fill = "Drug class") +
+  scale_fill_manual(
+    values = col_use,
+    breaks = arg_order_top_down,
+    labels = function(x) str_wrap(x, width = 22)
+  ) +
+  guides(fill = guide_legend(ncol = 1)) +
+  theme_bw() +
+  theme(
+    text          = element_text(size = 12, family = "sans"),
+    # ---- Font sizes consistent with the second script ----
+    legend.title  = element_text(colour = "black", size = 18, face = "bold"),
+    legend.text   = element_text(colour = "black", size = 18),
+    axis.text.y   = element_text(colour = "black", size = 14, face = "bold"),
+    axis.title.y  = element_text(colour = "black", size = 16, face = "bold"),
+    axis.text.x   = element_text(colour = "black", size = 18, face = "bold",
+                                 angle = 0, hjust = 0.5, vjust = 1),
+    axis.title.x  = element_text(colour = "black", size = 18, face = "bold"),
+    panel.grid    = element_blank(),
+    panel.border  = element_rect(fill = NA, color = "black",
+                                 linewidth = 1, linetype = "solid")
+  )
+print(p1)
+
+# ===== 9. Save =====
+ggsave("~/Desktop/codes/figures/Fig2j.pdf", p1,
+       width = 8, height = 5, dpi = 600)
+```
+

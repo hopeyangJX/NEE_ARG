@@ -1,0 +1,769 @@
+---
+title: "Fig1"
+output: html_document
+date: "2026-10-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r,fig.height=12,fig.width=5}
+rm(list=ls())
+setwd("~/Desktop/codes")
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(ggthemes)
+library(tidyverse)
+library(ggtext)     # ← 用于渲染 HTML 富文本（粗体 + 斜体 + 下标）
+
+# 读取并过滤数据
+plot_data1 <- read_excel("~/Desktop/codes/data/Fig1_data.xlsx", sheet = "a_e")
+plot_data1[is.na(plot_data1)] <- ""
+plot_data1 <- plot_data1 %>% filter(group %in% c("pH", "metals", "MRG", "ARG", "HP"))
+
+custom_colors <- c("N50cont" = "red", "N50cess" = "blue")
+plot_data <- plot_data1
+
+# 注意：这里统一用普通连字符 "-"，避免非断连字符导致匹配失败
+plot_data$significant <- ifelse(plot_data$pval < 0.05, "Significant", "Non-significant")
+plot_data$fill_color <- ifelse(plot_data$significant == "Significant",
+                               custom_colors[plot_data$Subgroup],
+                               "white")
+plot_data$point_shape <- ifelse(plot_data$significant == "Significant", 16, 21)
+plot_data$Subgroup <- factor(plot_data$Subgroup, levels = c("YN50", "NN50"))
+plot_data$Subgroup <- factor(plot_data$Subgroup, labels = c("N50cont", "N50cess"))
+plot_data$group <- factor(plot_data$group, levels = c("pH", "metals", "MRG", "ARG", "HP"))
+plot_data$group <- factor(plot_data$group, labels = c("Soil pH", 
+                                                      "Heavy metals",
+                                                      "MRGs", 
+                                                      "ARGs",
+                                                      "Potential human pathogens"))
+
+## ========== p 标签位置 ==========
+## Soil pH：蓝色也右移；Heavy metals：红蓝都左移；其余面板保持原偏移
+plot_data <- plot_data %>%
+  mutate(
+    label_x = case_when(
+      # ---- Soil pH ----
+      as.character(group) == "Soil pH" & Subgroup == "N50cont" ~ estimate + 0.22,  # 红：右移
+      as.character(group) == "Soil pH" & Subgroup == "N50cess" ~ estimate + 0.12,  # 蓝：右移
+      # ---- Heavy metals ----
+      as.character(group) == "Heavy metals" & Subgroup == "N50cont" ~ estimate - 0.02,  # 红：左移
+      as.character(group) == "Heavy metals" & Subgroup == "N50cess" ~ estimate - 0.10,  # 蓝：左移
+      # ---- 其它面板默认 ----
+      Subgroup == "N50cont" ~ estimate + 0.08,
+      TRUE                  ~ estimate
+    ),
+    label_y = as.numeric(Subgroup) + 0.12,
+    p_label = ifelse(
+      pval < 0.001,
+      paste0("<b><i>p</i> = ", formatC(pval, format = "e", digits = 1), "</b>"),
+      paste0("<b><i>p</i> = ", formatC(pval, format = "f", digits = 3), "</b>")
+    )
+  )
+
+# 绘图
+p <- ggplot(plot_data, aes(x = estimate, y = Subgroup)) +
+  facet_wrap(.~group, ncol = 1) +
+  geom_errorbarh(aes(xmax = estimate + 1.96 * se,
+                     xmin = estimate - 1.96 * se,
+                     color = Subgroup,
+                     linetype = "95% CI"),
+                 size = 1.5, height = 0, alpha = 0.5) +
+  geom_errorbarh(aes(xmax = estimate + se,
+                     xmin = estimate - se,
+                     color = Subgroup,
+                     linetype = "±SE"),
+                 size = 2.5, height = 0, alpha = 0.5) +
+  geom_point(aes(fill = fill_color, color = Subgroup, shape = significant),
+             size = 5, stroke = 1, alpha = 0.5) +  
+  # HTML-rendered p label: p bold italic, rest bold upright
+  geom_richtext(aes(x = label_x, y = label_y, label = p_label, color = Subgroup),
+                size = 3.2, hjust = 0.42, vjust = 0.1,
+                fill = NA, label.color = NA, label.padding = unit(0, "pt"),
+                show.legend = FALSE) +
+  # ↓↓↓ 修改 1：color 图例标签用 HTML 下标，并用 breaks 反转图例顺序（N50cess 在上）
+  scale_color_manual(
+    values = custom_colors,
+    name   = "Treatment",
+    breaks = c("N50cess", "N50cont"),   # ← 仅新增这一行
+    labels = c("N50cont" = "N50<sub>cont</sub>",
+               "N50cess" = "N50<sub>cess</sub>")
+  ) +
+  scale_fill_identity() + 
+  # ↓↓↓ 修改 2：y 轴刻度标签用 HTML 下标
+  scale_y_discrete(
+    labels = c("N50cont" = "N50<sub>cont</sub>",
+               "N50cess" = "N50<sub>cess</sub>")
+  ) +
+  # Significance legend labels with italic p
+  scale_shape_manual(name = "Significance",
+                     values = c("Significant" = 16, "Non-significant" = 21),
+                     labels = c("Significant"     = "<i>p</i> < 0.05",
+                                "Non-significant" = "<i>p</i> > 0.05")) +
+  scale_linetype_manual(name = "Error bars",
+                        values = c("95% CI" = "solid", "±SE" = "solid"),
+                        guide = guide_legend(override.aes = list( 
+                          size = c(1.5, 2.5),
+                          alpha = c(0.4, 0.7),
+                          color = "black"))) +
+  geom_vline(xintercept = 0, color = "gray", linetype = "dashed", alpha = 0.5, size = 1.5) +
+  labs(x = 'Effect size of nitrogen addition (LRR)',
+       y = '',
+       title = " ") +
+  theme_few() +
+  theme(
+    # ↓↓↓ 修改 3：拆开 axis.text，y 轴用 element_markdown 渲染下标
+    axis.text.x = element_text(size = 12, color = "black", face = "bold"),
+    axis.text.y = element_markdown(size = 12, color = "black", face = "bold"),
+    title = element_text(size = 12),
+    legend.position = "right", 
+    legend.title = element_text(size = 11),
+    # HTML rendering for legend text (italic p + subscripts)
+    legend.text = element_markdown(size = 12),
+    axis.title.x = element_text(size = 14, face = "bold"),
+    legend.key = element_rect(fill = "white"), 
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    strip.text = element_text(size = 12, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5, size = 10),
+    panel.border = element_rect(fill = NA, color = "black", size = 1.5, linetype = "solid")
+  )
+p
+
+ggsave("~/Desktop/codes/figures/Fig1a-e.pdf", width = 5, height = 12,
+       device = cairo_pdf)
+```
+
+
+```{r cars,fig.width=5,fig.height=5}
+rm(list = ls())
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(readxl)
+library(ggtext)     # ← 用于 HTML 渲染的标签（下标、斜体、粗体）
+setwd("~/Desktop/codes")
+
+# ---------- Read data ----------
+df <- read_excel("~/Desktop/codes/data/Fig1_data.xlsx", sheet = "f_j")
+
+# Recode TR: YN50 -> N50cont, NN50 -> N50cess, N0 -> Control
+df <- df %>%
+  mutate(TR = case_when(
+    TR == "YN50" ~ "N50cont",
+    TR == "NN50" ~ "N50cess",
+    TR == "N0"   ~ "Control"
+  )) %>%
+  drop_na(all_amcc_5kb)
+
+# Factor order: Control -> N50cess -> N50cont
+df$TR <- factor(df$TR, levels = c("Control", "N50cess", "N50cont"))
+
+# ---------- Sample size per group ----------
+cat("======== Sample counts per group ========\n")
+print(table(df$TR))
+
+# ---------- Extract values per group ----------
+Control <- df %>% filter(TR == "Control") %>% pull(all_amcc_5kb)
+N50cess <- df %>% filter(TR == "N50cess") %>% pull(all_amcc_5kb)
+N50cont <- df %>% filter(TR == "N50cont") %>% pull(all_amcc_5kb)
+
+# ---------- 1. Welch's t-test (planned comparisons) ----------
+t1 <- t.test(N50cess, Control, var.equal = FALSE)
+t2 <- t.test(N50cont, Control, var.equal = FALSE)
+
+p_raw <- c(t1$p.value, t2$p.value)
+
+cat("\n--- Welch's t-test (uncorrected, planned comparisons) ---\n")
+cat("N50cess vs Control: t =", round(t1$statistic, 3),
+    " df =", round(t1$parameter, 2),
+    " p =", p_raw[1], "\n")
+cat("N50cont vs Control: t =", round(t2$statistic, 3),
+    " df =", round(t2$parameter, 2),
+    " p =", p_raw[2], "\n")
+
+# ---------- 2. HTML annotation labels ----------
+annot_labels <- c(
+  sprintf("<b><i>t</i> = %.2f, <i>p</i> = %.3f</b>", t1$statistic, p_raw[1]),
+  sprintf("<b><i>t</i> = %.2f, <i>p</i> = %.3f</b>", t2$statistic, p_raw[2])
+)
+
+# ---------- 3. Bracket positions based on data range ----------
+y_max   <- max(df$all_amcc_5kb, na.rm = TRUE)
+y_min   <- min(df$all_amcc_5kb, na.rm = TRUE)
+y_range <- y_max - y_min
+
+bracket_y1 <- y_max + y_range * 0.10   # lower bracket (N50cess vs Control)
+bracket_y2 <- y_max + y_range * 0.30   # upper bracket (N50cont vs Control)
+y_top      <- y_max + y_range * 0.60   # leave space for labels
+
+tip <- y_range * 0.015
+
+# ---------- 颜色：正红 / 正蓝（与 Fig1a-e 一致） ----------
+col_ctrl <- "#c4c4c4"
+col_blue <- "blue"
+col_red  <- "red"
+
+# 括号 + 标签数据框：第 1 行 = N50cess（蓝），第 2 行 = N50cont（红）
+brk <- data.frame(
+  x      = c(1.6, 2.2),
+  xmin   = c(1, 1),
+  xmax   = c(2, 3),
+  y      = c(bracket_y1, bracket_y2),
+  label  = annot_labels,
+  col    = c(col_blue, col_red),
+  stringsAsFactors = FALSE
+)
+
+# ---------- 4. Plot ----------
+p <- ggplot(df, aes(x = TR, y = all_amcc_5kb, fill = TR)) +
+  geom_boxplot(width = 0.6, colour = "black", linewidth = 0.3,
+               alpha = 0.5, outlier.shape = NA) +
+  geom_point(aes(color = TR),
+             size = 5.5, alpha = 0.5,
+             position = position_jitter(width = 0.12, height = 0, seed = 1),
+             show.legend = FALSE) +
+  scale_fill_manual(
+    name = "Treatment",
+    values = c("Control" = col_ctrl, "N50cess" = col_blue, "N50cont" = col_red)
+  ) +
+  scale_color_manual(
+    name = "Treatment",
+    values = c("Control" = col_ctrl, "N50cess" = col_blue, "N50cont" = col_red)
+  ) +
+  # ★ x 轴刻度标签：按因子水平顺序给字符向量（Control -> N50cess -> N50cont）
+  scale_x_discrete(
+    labels = c("Control",
+               "N50<sub>cess</sub>",
+               "N50<sub>cont</sub>")
+  ) +
+  scale_y_continuous(
+    limits = c(NA, y_top),
+    expand = expansion(mult = c(0.05, 0.02))
+  ) +
+  # ===== 蓝色括号 + 蓝色统计值（N50cess vs Control）=====
+geom_segment(data = brk[1, ],
+             aes(x = xmin, xend = xmax, y = y, yend = y),
+             colour = col_blue, inherit.aes = FALSE, linewidth = 0.6) +
+  geom_segment(data = brk[1, ],
+               aes(x = xmin, xend = xmin, y = y - tip, yend = y),
+               colour = col_blue, inherit.aes = FALSE, linewidth = 0.6) +
+  geom_segment(data = brk[1, ],
+               aes(x = xmax, xend = xmax, y = y - tip, yend = y),
+               colour = col_blue, inherit.aes = FALSE, linewidth = 0.6) +
+  geom_richtext(data = brk[1, ],
+                aes(x = x, y = y, label = label),
+                color = col_blue,
+                inherit.aes = FALSE,
+                size = 5.5, vjust = -0.25,
+                fill = NA, label.color = NA,
+                label.padding = unit(0, "pt")) +
+  # ===== 红色括号 + 红色统计值（N50cont vs Control）=====
+geom_segment(data = brk[2, ],
+             aes(x = xmin, xend = xmax, y = y, yend = y),
+             colour = col_red, inherit.aes = FALSE, linewidth = 0.6) +
+  geom_segment(data = brk[2, ],
+               aes(x = xmin, xend = xmin, y = y - tip, yend = y),
+               colour = col_red, inherit.aes = FALSE, linewidth = 0.6) +
+  geom_segment(data = brk[2, ],
+               aes(x = xmax, xend = xmax, y = y - tip, yend = y),
+               colour = col_red, inherit.aes = FALSE, linewidth = 0.6) +
+  geom_richtext(data = brk[2, ],
+                aes(x = x, y = y, label = label),
+                color = col_red,
+                inherit.aes = FALSE,
+                size = 5.5, vjust = -0.25,
+                fill = NA, label.color = NA,
+                label.padding = unit(0, "pt")) +
+  xlab(" ") +
+  ylab("Relative abundance of AMCC (×/Gb)") +
+  ggtitle("ARG and MRG co-located contigs (AMCC)") +
+  theme_bw() +
+  theme(
+    text = element_text(size = 16, family = "sans"),
+    plot.title = element_text(hjust = 0.5, size = 12, face = "bold"),
+    # ★ x、y 轴分别设置 element_markdown，确保 x 轴 <sub> 被渲染
+    axis.text.x = element_markdown(size = 18, colour = "black", face = "bold"),
+    axis.text.y = element_markdown(size = 16, colour = "black", face = "bold"),
+    axis.title = element_text(colour = "black", size = 16, face = "bold"),
+    panel.border = element_rect(fill = NA, color = "black",
+                                size = 1.5, linetype = "solid"),
+    strip.text = element_text(size = 16, face = "bold"),
+    legend.title = element_text(size = 16, face = "bold"),
+    legend.text = element_text(size = 16),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "none"
+  )
+print(p)
+
+# ---------- 5. Export ----------
+ggsave("~/Desktop/codes/figures/Fig1f.pdf",
+       p, width = 5, height = 5, dpi = 300,
+       device = cairo_pdf)
+```
+```{r,fig.width=5,fig.height=5}
+rm(list = ls())
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(readxl)
+library(ggtext)     # ← 用于 HTML 渲染的标签（下标、斜体、粗体）
+setwd("~/Desktop/codes")
+
+# Read data
+df <- read_excel("~/Desktop/codes/data/Fig1_data.xlsx", sheet = "f_j")
+
+# Recode TR: YN50 -> N50cont, NN50 -> N50cess, N0 -> Control
+df <- df %>%
+  mutate(TR = case_when(
+    TR == "YN50" ~ "N50cont",
+    TR == "NN50" ~ "N50cess",
+    TR == "N0"   ~ "Control"
+  )) %>%
+  drop_na(mag)
+
+# Factor order: Control -> N50cess -> N50cont
+df$TR <- factor(df$TR, levels = c("Control", "N50cess", "N50cont"))
+
+# ---------- Sample size per group ----------
+cat("======== Sample counts per group ========\n")
+print(table(df$TR))
+
+# ---------- Extract values per group ----------
+Control <- df %>% filter(TR == "Control") %>% pull(mag)
+N50cess <- df %>% filter(TR == "N50cess") %>% pull(mag)
+N50cont <- df %>% filter(TR == "N50cont") %>% pull(mag)
+
+# ---------- 1. Welch's t-test (planned comparisons) ----------
+t1 <- t.test(N50cess, Control, var.equal = FALSE)
+t2 <- t.test(N50cont, Control, var.equal = FALSE)
+
+p_raw <- c(t1$p.value, t2$p.value)
+
+cat("\n--- Welch's t-test (uncorrected, planned comparisons) ---\n")
+cat("N50cess vs Control: t =", round(t1$statistic, 3),
+    " df =", round(t1$parameter, 2),
+    " p =", p_raw[1], "\n")
+cat("N50cont vs Control: t =", round(t2$statistic, 3),
+    " df =", round(t2$parameter, 2),
+    " p =", p_raw[2], "\n")
+
+# ---------- 2. HTML annotation labels ----------
+annot_labels <- c(
+  sprintf("<b><i>t</i> = %.2f, <i>p</i> = %.3f</b>", t1$statistic, p_raw[1]),
+  sprintf("<b><i>t</i> = %.2f, <i>p</i> = %.3f</b>", t2$statistic, p_raw[2])
+)
+
+# ---------- 3. Bracket positions based on data range ----------
+y_max   <- max(df$mag, na.rm = TRUE)
+y_min   <- min(df$mag, na.rm = TRUE)
+y_range <- y_max - y_min
+
+bracket_y1 <- y_max + y_range * 0.10   # lower bracket (Control vs N50cess)
+bracket_y2 <- y_max + y_range * 0.30   # upper bracket (Control vs N50cont)
+y_top      <- y_max + y_range * 0.65   # 给放大的标签留出顶部余量
+
+tip <- y_range * 0.015
+
+# ---------- 颜色：正红 / 正蓝（与 Fig1a-e、Fig1f 一致） ----------
+col_ctrl <- "#c4c4c4"
+col_blue <- "blue"
+col_red  <- "red"
+
+# 括号 + 标签数据框：第 1 行 = N50cess（蓝），第 2 行 = N50cont（红）
+brk <- data.frame(
+  x      = c(1.6, 2.2),
+  xmin   = c(1, 1),
+  xmax   = c(2, 3),
+  y      = c(bracket_y1, bracket_y2),
+  label  = annot_labels,
+  col    = c(col_blue, col_red),
+  stringsAsFactors = FALSE
+)
+
+# ---------- 4. Plot ----------
+p <- ggplot(df, aes(x = TR, y = mag, fill = TR)) +
+  geom_boxplot(width = 0.6, colour = "black", linewidth = 0.3,
+               alpha = 0.5, outlier.shape = NA) +
+  geom_point(aes(color = TR),
+             size = 5.5, alpha = 0.5,
+             position = position_jitter(width = 0.12, height = 0, seed = 1),
+             show.legend = FALSE) +
+  scale_fill_manual(
+    name = "Treatment",
+    values = c("Control" = col_ctrl, "N50cess" = col_blue, "N50cont" = col_red)
+  ) +
+  scale_color_manual(
+    name = "Treatment",
+    values = c("Control" = col_ctrl, "N50cess" = col_blue, "N50cont" = col_red)
+  ) +
+  # ★ x 轴刻度标签：按因子水平顺序给字符向量（Control -> N50cess -> N50cont）
+  scale_x_discrete(
+    labels = c("Control",
+               "N50<sub>cess</sub>",
+               "N50<sub>cont</sub>")
+  ) +
+  scale_y_continuous(
+    limits = c(NA, y_top),
+    expand = expansion(mult = c(0.05, 0.02))
+  ) +
+  # ===== 蓝色括号 + 蓝色统计值（N50cess vs Control）=====
+geom_segment(data = brk[1, ],
+             aes(x = xmin, xend = xmax, y = y, yend = y),
+             colour = col_blue, inherit.aes = FALSE, linewidth = 0.6) +
+  geom_segment(data = brk[1, ],
+               aes(x = xmin, xend = xmin, y = y - tip, yend = y),
+               colour = col_blue, inherit.aes = FALSE, linewidth = 0.6) +
+  geom_segment(data = brk[1, ],
+               aes(x = xmax, xend = xmax, y = y - tip, yend = y),
+               colour = col_blue, inherit.aes = FALSE, linewidth = 0.6) +
+  geom_richtext(data = brk[1, ],
+                aes(x = x, y = y, label = label),
+                color = col_blue,
+                inherit.aes = FALSE,
+                size = 5.5, vjust = -0.25,
+                fill = NA, label.color = NA,
+                label.padding = unit(0, "pt")) +
+  # ===== 红色括号 + 红色统计值（N50cont vs Control）=====
+geom_segment(data = brk[2, ],
+             aes(x = xmin, xend = xmax, y = y, yend = y),
+             colour = col_red, inherit.aes = FALSE, linewidth = 0.6) +
+  geom_segment(data = brk[2, ],
+               aes(x = xmin, xend = xmin, y = y - tip, yend = y),
+               colour = col_red, inherit.aes = FALSE, linewidth = 0.6) +
+  geom_segment(data = brk[2, ],
+               aes(x = xmax, xend = xmax, y = y - tip, yend = y),
+               colour = col_red, inherit.aes = FALSE, linewidth = 0.6) +
+  geom_richtext(data = brk[2, ],
+                aes(x = x, y = y, label = label),
+                color = col_red,
+                inherit.aes = FALSE,
+                size = 5.5, vjust = -0.25,
+                fill = NA, label.color = NA,
+                label.padding = unit(0, "pt")) +
+  xlab(" ") +
+  ylab("Relative abundance of MAGs (%)") +
+  ggtitle("Metagenome assembled genomes (MAGs)") +
+  theme_bw() +
+  theme(
+    text = element_text(size = 16, family = "sans"),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    # ★ x、y 轴分别设置 element_markdown，确保 x 轴 <sub> 被渲染
+    axis.text.x = element_markdown(size = 18, colour = "black", face = "bold"),
+    axis.text.y = element_markdown(size = 16, colour = "black", face = "bold"),
+    axis.title = element_text(colour = "black", size = 16, face = "bold"),
+    panel.border = element_rect(fill = NA, color = "black",
+                                size = 1.5, linetype = "solid"),
+    strip.text = element_text(size = 16, face = "bold"),
+    legend.title = element_text(size = 16, face = "bold"),
+    legend.text = element_text(size = 16),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "none"
+  )
+print(p)
+
+# ---------- 5. Export ----------
+ggsave("~/Desktop/codes/figures/Fig1h.pdf",
+       p, width = 5, height = 5, dpi = 300,
+       device = cairo_pdf)
+```
+
+
+```{r,fig.width=5,fig.height=5}
+setwd("~/Desktop/codes")
+rm(list = ls())
+
+# ========== Stacked bar plot (mean): plasmid_arg + non_plasmid_arg, grouped by TR ==========
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(readxl)
+library(ggtext)     # ← 用于 HTML 渲染下标
+df <- read_excel("~/Desktop/codes/data/Fig1_data.xlsx", sheet = "f_j")
+
+# --- 1. Calculate non_plasmid_arg = total ARG_CARD - plasmid_arg ---
+df$non_plasmid_arg <- df$ARG_CARD - df$plasmid_arg
+
+# --- 2. Recode TR treatment: Control / N50cess / N50cont ---
+df <- df %>%
+  mutate(TR = case_when(
+    TR == "N0"   ~ "Control",
+    TR == "NN50" ~ "N50cess",
+    TR == "YN50" ~ "N50cont",
+    TRUE         ~ as.character(TR)
+  ))
+
+df$TR <- factor(df$TR, levels = c("Control", "N50cess", "N50cont"))
+
+# --- 3. Compute mean by TR group (not sum) ---
+df_sum <- df %>%
+  group_by(TR) %>%
+  summarise(
+    plasmid_arg     = mean(plasmid_arg,     na.rm = TRUE),
+    non_plasmid_arg = mean(non_plasmid_arg, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# --- 3b. Calculate percentage based on means ---
+df_pct <- df_sum %>%
+  mutate(
+    total       = plasmid_arg + non_plasmid_arg,
+    pct_plasmid = plasmid_arg / total * 100
+  ) %>%
+  dplyr::select(TR, total, pct_plasmid)   # use dplyr:: to avoid MASS masking
+
+cat("========Mean and percentage per group========\n")
+print(df_pct)
+
+# --- 4. Wide to long ---
+df_long <- df_sum %>%
+  pivot_longer(
+    cols = c(plasmid_arg, non_plasmid_arg),
+    names_to  = "Type",
+    values_to = "Value"
+  )
+
+df_long$Type <- factor(df_long$Type, levels = c("plasmid_arg", "non_plasmid_arg"))
+
+# --- 5. Plot ---
+p <- ggplot(df_long, aes(x = TR, y = Value, fill = Type)) +
+  geom_col(width = 0.7) +
+  scale_fill_manual(
+    values = c(
+      "plasmid_arg"     = "#C2185B",
+      "non_plasmid_arg" = "#c4c4c4"
+    ),
+    labels = c("Plasmid borne ARGs", "Non plasmid ARGs")
+  ) +
+  scale_x_discrete(
+    labels = c("Control",
+               "N50<sub>cess</sub>",
+               "N50<sub>cont</sub>")
+  ) +
+  geom_text(
+    data = df_pct,
+    aes(x = TR, y = total, label = sprintf("%.2f%%", pct_plasmid)),
+    inherit.aes = FALSE,
+    vjust = -0.6, size = 4.5, fontface = "bold",
+    color = "#C2185B"
+  ) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
+  xlab(" ") +
+  ylab(expression(bold("Relative abundance of ARGs (×/Gb)"))) +
+  labs(fill = NULL) +
+  theme_bw() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    
+    axis.text.x  = element_markdown(angle = 0, hjust = 0.5, size = 18,
+                                    face = "bold", colour = "black"),
+    axis.text.y  = element_text(size = 16, face = "bold",
+                                colour = "black"),
+    axis.title   = element_text(size = 16, face = "bold",
+                                colour = "black"),
+    
+    legend.position      = "top",
+    legend.justification = "center",
+    legend.direction     = "horizontal",
+    legend.background    = element_blank(),
+    legend.key           = element_blank(),
+    # ★ 图例文字加粗
+    legend.text          = element_text(size = 12, face = "bold"),
+    legend.margin        = margin(0, 0, 0, 0),
+    
+    plot.margin = margin(t = 8, r = 8, b = 8, l = 8),
+    
+    panel.border = element_rect(size = 1.5, colour = "black", fill = NA),
+    axis.line    = element_blank(),
+    axis.ticks   = element_line(size = 1.5, colour = "black")
+  )
+
+print(p)
+
+# --- 6. Export ---
+ggsave("~/Desktop/codes/figures/Fig1i.pdf", p, width = 5, height = 5, dpi = 300)
+```
+
+```{r,fig.width=5,fig.height=5}
+rm(list = ls())
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(readxl)
+library(ggtext)     # ← 用于 HTML 渲染的标签（下标、斜体、粗体）
+setwd("~/Desktop/codes")
+
+# Read data
+df <- read_excel("~/Desktop/codes/data/Fig1_data.xlsx", sheet = "f_j")
+
+# Recode TR: YN50 -> N50cont, NN50 -> N50cess, N0 -> Control
+df <- df %>%
+  mutate(TR = case_when(
+    TR == "YN50" ~ "N50cont",
+    TR == "NN50" ~ "N50cess",
+    TR == "N0"   ~ "Control"
+  )) %>%
+  drop_na(plasmid_amcc_5kb)
+
+# Factor order: Control -> N50cess -> N50cont
+df$TR <- factor(df$TR, levels = c("Control", "N50cess", "N50cont"))
+
+# ---------- Sample size per group ----------
+cat("======== Sample counts per group ========\n")
+print(table(df$TR))
+
+# ---------- Extract values per group ----------
+Control <- df %>% filter(TR == "Control") %>% pull(plasmid_amcc_5kb)
+N50cess <- df %>% filter(TR == "N50cess") %>% pull(plasmid_amcc_5kb)
+N50cont <- df %>% filter(TR == "N50cont") %>% pull(plasmid_amcc_5kb)
+
+# ---------- 1. Welch's t-test (planned comparisons) ----------
+t1 <- t.test(N50cess, Control, var.equal = FALSE)
+t2 <- t.test(N50cont, Control, var.equal = FALSE)
+
+p_raw <- c(t1$p.value, t2$p.value)
+
+cat("\n--- Welch's t-test (uncorrected, planned comparisons) ---\n")
+cat("N50cess vs Control: t =", round(t1$statistic, 3),
+    " df =", round(t1$parameter, 2),
+    " p =", p_raw[1], "\n")
+cat("N50cont vs Control: t =", round(t2$statistic, 3),
+    " df =", round(t2$parameter, 2),
+    " p =", p_raw[2], "\n")
+
+# ---------- 2. HTML annotation labels ----------
+annot_labels <- c(
+  sprintf("<b><i>t</i> = %.2f, <i>p</i> = %.3f</b>", t1$statistic, p_raw[1]),
+  sprintf("<b><i>t</i> = %.2f, <i>p</i> = %.3f</b>", t2$statistic, p_raw[2])
+)
+
+# ---------- 3. Bracket positions based on data range ----------
+y_max   <- max(df$plasmid_amcc_5kb, na.rm = TRUE)
+y_min   <- min(df$plasmid_amcc_5kb, na.rm = TRUE)
+y_range <- y_max - y_min
+
+bracket_y1 <- y_max + y_range * 0.10   # lower bracket (Control vs N50cess)
+bracket_y2 <- y_max + y_range * 0.30   # upper bracket (Control vs N50cont)
+y_top      <- y_max + y_range * 0.65   # 为放大的标签留白
+
+tip <- y_range * 0.015
+
+# ---------- 颜色：正红 / 正蓝（与 Fig1a-e、Fig1f、Fig1h 一致） ----------
+col_ctrl <- "#c4c4c4"
+col_blue <- "blue"
+col_red  <- "red"
+
+# 括号 + 标签数据框：第 1 行 = N50cess（蓝），第 2 行 = N50cont（红）
+brk <- data.frame(
+  x      = c(1.6, 2.2),
+  xmin   = c(1, 1),
+  xmax   = c(2, 3),
+  y      = c(bracket_y1, bracket_y2),
+  label  = annot_labels,
+  col    = c(col_blue, col_red),
+  stringsAsFactors = FALSE
+)
+
+# ---------- 4. Plot ----------
+p <- ggplot(df, aes(x = TR, y = plasmid_amcc_5kb, fill = TR)) +
+  geom_boxplot(width = 0.6, colour = "black", linewidth = 0.3,
+               alpha = 0.5, outlier.shape = NA) +
+  geom_point(aes(color = TR),
+             size = 5.5, alpha = 0.5,
+             position = position_jitter(width = 0.12, height = 0, seed = 1),
+             show.legend = FALSE) +
+  scale_fill_manual(
+    name = "Treatment",
+    values = c("Control" = col_ctrl, "N50cess" = col_blue, "N50cont" = col_red)
+  ) +
+  scale_color_manual(
+    name = "Treatment",
+    values = c("Control" = col_ctrl, "N50cess" = col_blue, "N50cont" = col_red)
+  ) +
+  # ★ x 轴刻度标签：按因子水平顺序给字符向量（Control -> N50cess -> N50cont）
+  scale_x_discrete(
+    labels = c("Control",
+               "N50<sub>cess</sub>",
+               "N50<sub>cont</sub>")
+  ) +
+  scale_y_continuous(
+    limits = c(NA, y_top),
+    expand = expansion(mult = c(0.05, 0.02))
+  ) +
+  # ===== 蓝色括号 + 蓝色统计值（N50cess vs Control）=====
+geom_segment(data = brk[1, ],
+             aes(x = xmin, xend = xmax, y = y, yend = y),
+             colour = col_blue, inherit.aes = FALSE, linewidth = 0.6) +
+  geom_segment(data = brk[1, ],
+               aes(x = xmin, xend = xmin, y = y - tip, yend = y),
+               colour = col_blue, inherit.aes = FALSE, linewidth = 0.6) +
+  geom_segment(data = brk[1, ],
+               aes(x = xmax, xend = xmax, y = y - tip, yend = y),
+               colour = col_blue, inherit.aes = FALSE, linewidth = 0.6) +
+  geom_richtext(data = brk[1, ],
+                aes(x = x, y = y, label = label),
+                color = col_blue,
+                inherit.aes = FALSE,
+                size = 5.5, vjust = -0.25,
+                fill = NA, label.color = NA,
+                label.padding = unit(0, "pt")) +
+  # ===== 红色括号 + 红色统计值（N50cont vs Control）=====
+geom_segment(data = brk[2, ],
+             aes(x = xmin, xend = xmax, y = y, yend = y),
+             colour = col_red, inherit.aes = FALSE, linewidth = 0.6) +
+  geom_segment(data = brk[2, ],
+               aes(x = xmin, xend = xmin, y = y - tip, yend = y),
+               colour = col_red, inherit.aes = FALSE, linewidth = 0.6) +
+  geom_segment(data = brk[2, ],
+               aes(x = xmax, xend = xmax, y = y - tip, yend = y),
+               colour = col_red, inherit.aes = FALSE, linewidth = 0.6) +
+  geom_richtext(data = brk[2, ],
+                aes(x = x, y = y, label = label),
+                color = col_red,
+                inherit.aes = FALSE,
+                size = 5.5, vjust = -0.25,
+                fill = NA, label.color = NA,
+                label.padding = unit(0, "pt")) +
+  xlab(" ") +
+  ylab("Relative abundance of plasmid AMCC (×/Gb)") +
+  ggtitle("ARG and MRG co-located on putative plasmid") +
+  theme_bw() +
+  theme(
+    text = element_text(size = 16, family = "sans"),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    # ★ x、y 轴分别设置 element_markdown，确保 x 轴 <sub> 被渲染
+    axis.text.x = element_markdown(size = 18, colour = "black", face = "bold"),
+    axis.text.y = element_markdown(size = 16, colour = "black", face = "bold"),
+    axis.title = element_text(colour = "black", size = 16, face = "bold"),
+    panel.border = element_rect(fill = NA, color = "black",
+                                size = 1.5, linetype = "solid"),
+    strip.text = element_text(size = 16, face = "bold"),
+    legend.title = element_text(size = 16, face = "bold"),
+    legend.text = element_text(size = 16),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "none"
+  )
+print(p)
+
+# ---------- 5. Export ----------
+ggsave("~/Desktop/codes/figures/Fig1j.pdf",
+       p, width = 5, height = 5, dpi = 300,
+       device = cairo_pdf)
+```
+
+

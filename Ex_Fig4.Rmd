@@ -1,0 +1,277 @@
+---
+title: "Ex_Fig4"
+output: html_document
+date: "2026-10-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars,fig.width=12,fig.height=5}
+rm(list = ls())
+setwd("~/Desktop/codes")
+
+library(readxl)
+library(vegan)
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+
+# ==============================
+# 1. Read ARG, MRG, ABG data
+# ==============================
+# ---- ARG ----
+abund_ARG <- read_excel("~/Desktop/codes/data/Ex_Fig4_data.xlsx", sheet = "C_ARG_abundance") %>% as.data.frame()
+rownames(abund_ARG) <- abund_ARG[[1]]
+abund_ARG <- abund_ARG[, -1]
+abund_ARG[] <- lapply(abund_ARG, function(x) as.numeric(as.character(x)))
+abund_ARG[is.na(abund_ARG)] <- 0
+abund_ARG[abund_ARG < 0] <- 0
+
+# ---- MRG ----
+abund_MRG <- read_excel("~/Desktop/codes/data/Ex_Fig4_data.xlsx", sheet = "C_MRG_abundance") %>% as.data.frame()
+rownames(abund_MRG) <- abund_MRG[[1]]
+abund_MRG <- abund_MRG[, -1]
+abund_MRG[] <- lapply(abund_MRG, function(x) as.numeric(as.character(x)))
+abund_MRG[is.na(abund_MRG)] <- 0
+abund_MRG[abund_MRG < 0] <- 0
+
+# ---- ABG ----
+abund_ABG <- read_excel("~/Desktop/codes/data/Ex_Fig4_data.xlsx", sheet = "C_ABG_abundance") %>% as.data.frame()
+rownames(abund_ABG) <- abund_ABG[[1]]
+abund_ABG <- abund_ABG[, -1]
+abund_ABG[] <- lapply(abund_ABG, function(x) as.numeric(as.character(x)))
+abund_ABG[is.na(abund_ABG)] <- 0
+abund_ABG[abund_ABG < 0] <- 0
+
+# ---- group ----
+group <- read_excel("~/Desktop/codes/data/Ex_fig4_data.xlsx", sheet = "C_group") %>% as.data.frame()
+rownames(group) <- group[[1]]
+group <- group[, -1]
+group$treatment2 <- factor(group$treatment2,
+                           levels = c("N0-C0", "N50-C0",
+                                      "N0-C2000", "N50-C2000"))
+
+# ==============================
+# 2. Sample matching
+# ==============================
+common_samples <- Reduce(intersect,
+                         list(rownames(abund_ARG),
+                              rownames(abund_MRG),
+                              rownames(abund_ABG),
+                              rownames(group)))
+abund_ARG <- abund_ARG[common_samples, , drop = FALSE]
+abund_MRG <- abund_MRG[common_samples, , drop = FALSE]
+abund_ABG <- abund_ABG[common_samples, , drop = FALSE]
+group     <- group[common_samples, , drop = FALSE]
+
+cat("Number of matched samples: ", length(common_samples), "\n")
+print(table(group$treatment2))
+
+# ==============================
+# 3. Distance matrices (Hellinger + Bray-Curtis)
+# ==============================
+abund_ARG <- abund_ARG[, colSums(abund_ARG) > 0, drop = FALSE]
+abund_MRG <- abund_MRG[, colSums(abund_MRG) > 0, drop = FALSE]
+abund_ABG <- abund_ABG[, colSums(abund_ABG) > 0, drop = FALSE]
+
+dist_ARG <- vegdist(decostand(abund_ARG, method = "hellinger"), method = "bray")
+dist_MRG <- vegdist(decostand(abund_MRG, method = "hellinger"), method = "bray")
+dist_ABG <- vegdist(decostand(abund_ABG, method = "hellinger"), method = "bray")
+
+# ==============================
+# 4. Simple Mantel (for reference)
+# ==============================
+set.seed(315)
+mant_ARG_MRG <- mantel(dist_ARG, dist_MRG, permutations = 9999)
+set.seed(315)
+mant_ARG_ABG <- mantel(dist_ARG, dist_ABG, permutations = 9999)
+
+cat(sprintf("Mantel ARG-MRG: R = %.3f, P = %.4g\n",
+            mant_ARG_MRG$statistic, mant_ARG_MRG$signif))
+cat(sprintf("Mantel ARG-ABG: R = %.3f, P = %.4g\n",
+            mant_ARG_ABG$statistic, mant_ARG_ABG$signif))
+
+# ==============================
+# 5. Partial Mantel
+# ==============================
+set.seed(315)
+pm_ARG_MRG_ABG <- mantel.partial(dist_ARG, dist_MRG, dist_ABG,
+                                 permutations = 9999)
+set.seed(315)
+pm_ARG_ABG_MRG <- mantel.partial(dist_ARG, dist_ABG, dist_MRG,
+                                 permutations = 9999)
+
+cat("\n===== Partial Mantel =====\n")
+cat(sprintf("ARG-MRG | ABG: R = %.3f, P = %.4g\n",
+            pm_ARG_MRG_ABG$statistic, pm_ARG_MRG_ABG$signif))
+cat(sprintf("ARG-ABG | MRG: R = %.3f, P = %.4g\n",
+            pm_ARG_ABG_MRG$statistic, pm_ARG_ABG_MRG$signif))
+
+# ==============================
+# 6. Residual calculation (only for scatter plot coordinates)
+# ==============================
+vec_ARG <- as.vector(dist_ARG)
+vec_MRG <- as.vector(dist_MRG)
+vec_ABG <- as.vector(dist_ABG)
+
+# Residuals of ARG and MRG after controlling for ABG
+res_ARG_ABG <- resid(lm(vec_ARG ~ vec_ABG))
+res_MRG_ABG <- resid(lm(vec_MRG ~ vec_ABG))
+
+# Residuals of ARG and ABG after controlling for MRG
+res_ARG_MRG <- resid(lm(vec_ARG ~ vec_MRG))
+res_ABG_MRG <- resid(lm(vec_ABG ~ vec_MRG))
+
+# ==============================
+# 7. Build plotting data
+# ==============================
+df1 <- data.frame(res_x = res_ARG_ABG, res_y = res_MRG_ABG)
+df2 <- data.frame(res_x = res_ARG_MRG, res_y = res_ABG_MRG)
+
+# ==============================
+# 7b. 残差回归统计 (lm: res_y ~ res_x) —— 只保留 R² 与 P
+# ==============================
+fit1 <- lm(res_y ~ res_x, data = df1)
+fit2 <- lm(res_y ~ res_x, data = df2)
+
+summ1 <- summary(fit1)
+summ2 <- summary(fit2)
+
+r2_1  <- summ1$r.squared
+pval1 <- summ1$coefficients["res_x", "Pr(>|t|)"]
+
+r2_2  <- summ2$r.squared
+pval2 <- summ2$coefficients["res_x", "Pr(>|t|)"]
+
+cat("\n===== Residual regression (lm res_y ~ res_x) =====\n")
+cat(sprintf("Panel a (ARG-MRG|ABG): R2 = %.3f, P = %.4g\n", r2_1, pval1))
+cat(sprintf("Panel b (ARG-ABG|MRG): R2 = %.3f, P = %.4g\n", r2_2, pval2))
+
+# ==============================
+# 8. Significance marks
+# ==============================
+sig_mark <- function(P) {
+  ifelse(P < 0.001, "***",
+         ifelse(P < 0.01, "**",
+                ifelse(P < 0.05, "*", "ns")))
+}
+
+# ==============================
+# 9. Annotation text (Partial Mantel + Residual regression，无 slope)
+# ==============================
+lab1 <- sprintf(
+  "Partial Mantel: R = %.2f, P = %.4g %s\nResidual lm: R\u00B2 = %.2f, P = %.4g %s",
+  pm_ARG_MRG_ABG$statistic, pm_ARG_MRG_ABG$signif,
+  sig_mark(pm_ARG_MRG_ABG$signif),
+  r2_1, pval1, sig_mark(pval1)
+)
+
+lab2 <- sprintf(
+  "Partial Mantel: R = %.2f, P = %.4g %s\nResidual lm: R\u00B2 = %.2f, P = %.4g %s",
+  pm_ARG_ABG_MRG$statistic, pm_ARG_ABG_MRG$signif,
+  sig_mark(pm_ARG_ABG_MRG$signif),
+  r2_2, pval2, sig_mark(pval2)
+)
+
+# ==============================
+# 10. Separate plots
+# ==============================
+x_pos1 <- min(df1$res_x) + 0.05 * diff(range(df1$res_x))
+y_pos1 <- max(df1$res_y) - 0.05 * diff(range(df1$res_y))
+
+x_pos2 <- min(df2$res_x) + 0.05 * diff(range(df2$res_x))
+y_pos2 <- max(df2$res_y) - 0.05 * diff(range(df2$res_y))
+
+p1 <- ggplot(df1, aes(x = res_x, y = res_y)) +
+  geom_point(color = "#000080", alpha = 0.5, size = 3.5) +
+  geom_smooth(method = "lm", se = TRUE,
+              color = "black", linewidth = 1) +
+  annotate("text",
+           x = x_pos1, y = y_pos1,
+           label = lab1,
+           hjust = 0, vjust = 1,
+           size = 3.5, fontface = "bold", color = "black") +
+  labs(x = "Residuals of ARG distance matrix (controlling ABG)",
+       y = "Residuals of MRG distance matrix (controlling ABG)",
+       title = "ARG\u2013MRG | ABG") +
+  theme_bw() +
+  theme(
+    plot.title   = element_text(size = 13, face = "bold", hjust = 0.5),
+    axis.text    = element_text(size = 11, face = "bold", colour = "black"),
+    axis.title   = element_text(size = 12, face = "bold"),
+    panel.grid   = element_blank(),
+    panel.border = element_rect(fill = NA, color = "black", linewidth = 1)
+  )
+
+p2 <- ggplot(df2, aes(x = res_x, y = res_y)) +
+  geom_point(color = "#FF7F50", alpha = 0.5, size = 3.5) +
+  geom_smooth(method = "lm", se = TRUE,
+              color = "black", linewidth = 1) +
+  annotate("text",
+           x = x_pos2, y = y_pos2,
+           label = lab2,
+           hjust = 0, vjust = 1,
+           size = 3.5, fontface = "bold", color = "black") +
+  labs(x = "Residuals of ARG distance matrix (controlling MRG)",
+       y = "Residuals of ABG distance matrix (controlling MRG)",
+       title = "ARG\u2013ABG | MRG") +
+  theme_bw() +
+  theme(
+    plot.title   = element_text(size = 13, face = "bold", hjust = 0.5),
+    axis.text    = element_text(size = 11, face = "bold", colour = "black"),
+    axis.title   = element_text(size = 12, face = "bold"),
+    panel.grid   = element_blank(),
+    panel.border = element_rect(fill = NA, color = "black", linewidth = 1)
+  )
+
+# ==============================
+# 11. Combine plots (a/b 标签加大)
+# ==============================
+p_combined <- (p1 + p2) +
+  plot_annotation(tag_levels = "a") &
+  theme(plot.tag = element_text(size = 22, face = "bold", colour = "black"))
+
+print(p_combined)
+ggsave("~/Desktop/codes/figures/Ex_Fig4ab.pdf", p_combined,
+       width = 12, height = 5, dpi = 600)
+
+# ==============================
+# 12. Save statistical results
+#     Mantel / Partial Mantel / 残差回归 (只含 R2, P)
+# ==============================
+stat_tab <- data.frame(
+  Analysis = c("Mantel ARG-MRG",
+               "Mantel ARG-ABG",
+               "Partial Mantel ARG-MRG | ABG",
+               "Partial Mantel ARG-ABG | MRG",
+               "Residual lm ARG-MRG | ABG",
+               "Residual lm ARG-ABG | MRG"),
+  R        = c(mant_ARG_MRG$statistic,
+               mant_ARG_ABG$statistic,
+               pm_ARG_MRG_ABG$statistic,
+               pm_ARG_ABG_MRG$statistic,
+               NA, NA),
+  P        = c(mant_ARG_MRG$signif,
+               mant_ARG_ABG$signif,
+               pm_ARG_MRG_ABG$signif,
+               pm_ARG_ABG_MRG$signif,
+               pval1, pval2),
+  R2       = c(NA, NA, NA, NA, r2_1, r2_2)
+)
+stat_tab$R  <- round(stat_tab$R, 3)
+stat_tab$P  <- signif(stat_tab$P, 3)
+stat_tab$R2 <- round(stat_tab$R2, 3)
+print(stat_tab)
+write.csv(stat_tab,
+          "~/Desktop/codes/tables/Ex_Fig4ab_Mantel_PartialMantel_results.csv",
+          row.names = FALSE)
+```
+

@@ -1,0 +1,240 @@
+---
+title: "Ex_Fig1"
+output: html_document
+date: "2026-10-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars,fig.width=18,fig.height=20}
+rm(list = ls())
+setwd("~/Desktop/codes")
+
+# ======================
+# 0. Load required R packages
+# ======================
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(patchwork)
+library(tibble)
+library(readxl)
+library(ggtext)      # ★ 新增：用于渲染下标
+
+# ======================
+# 1. Element symbol mapping for MRG y-axis labels
+# ======================
+element_symbols <- c(
+  "Aluminium"  = "Al", "Antimony" = "Sb", "Arsenic" = "As",
+  "Cadmium"    = "Cd", "Chromium" = "Cr", "Cobalt"  = "Co",
+  "Copper"     = "Cu", "Gold"     = "Au", "Iron"    = "Fe",
+  "Lead"       = "Pb", "Magnesium" = "Mg", "Manganese" = "Mn",
+  "Mercury"    = "Hg", "Molybdenum" = "Mo", "Nickel"  = "Ni",
+  "Selenium"   = "Se", "Silver"    = "Ag", "Tellurium" = "Te",
+  "Tungsten"   = "W",  "Vanadium"  = "V", "Zinc"    = "Zn"
+)
+
+label_with_symbol <- function(x) {
+  ifelse(x %in% names(element_symbols),
+         paste0(x, " (", element_symbols[x], ")"),
+         x)
+}
+
+# ======================
+# 2. Builder function
+# ======================
+build_figure <- function(xlsx_file, id_sheet, abund_sheet, plot_title) {
+  
+  # --- Read data ---
+  co_loc <- read_excel(xlsx_file, sheet = id_sheet) %>%
+    as.data.frame(stringsAsFactors = FALSE)
+  
+  abundance <- read_excel(xlsx_file, sheet = abund_sheet) %>%
+    as.data.frame(stringsAsFactors = FALSE) %>%
+    column_to_rownames(var = names(.)[1])
+  
+  # --- Sample grouping table ---
+  sample_group <- data.frame(
+    sample = c("s1", "s2", "s3", "s4", "s5",
+               "s6", "s7", "s8", "s9", "s10",
+               "s11", "s12", "s13", "s14", "s15"),
+    Treatment = c(rep("Control",  5),
+                  rep("N50cess",  5),
+                  rep("N50cont",  5)),
+    stringsAsFactors = FALSE
+  )
+  sample_group$Treatment <- factor(sample_group$Treatment,
+                                   levels = c("Control", "N50cess", "N50cont"),
+                                   ordered = TRUE)
+  
+  # --- Filter valid contig-ARG-MRG pairs ---
+  pair_contig <- co_loc %>%
+    select(contigs, ARG, MRG) %>%
+    filter(!is.na(ARG), !is.na(MRG), !is.na(contigs)) %>%
+    mutate(ARG = dplyr::recode(ARG,
+                               "Disinfecting agents and antiseptics" = "DAAs")) %>%
+    distinct(contigs, ARG, MRG, .keep_all = TRUE)
+  
+  # --- Per-sample coverage score per ARG-MRG pair ---
+  sample_score_list <- list()
+  for (s in colnames(abundance)) {
+    samp_abun <- abundance[, s, drop = FALSE] %>%
+      tibble::rownames_to_column("contigs") %>%
+      rename(abun = 2) %>%
+      filter(!is.na(abun))
+    
+    samp_pair <- pair_contig %>%
+      left_join(samp_abun, by = "contigs") %>%
+      mutate(abun = ifelse(is.na(abun), 0, abun)) %>%
+      group_by(ARG, MRG) %>%
+      summarise(weighted_score = sum(abun), .groups = "drop") %>%
+      mutate(sample = s)
+    
+    sample_score_list[[s]] <- samp_pair
+  }
+  sample_scores <- bind_rows(sample_score_list)
+  
+  # --- Mean coverage per treatment ---
+  treat_scores <- sample_scores %>%
+    inner_join(sample_group, by = c("sample" = "sample")) %>%
+    group_by(Treatment, ARG, MRG) %>%
+    summarise(weighted_mean = mean(weighted_score), .groups = "drop")
+  
+  # --- Complete ARG-MRG grid ---
+  full_grid <- expand.grid(ARG = unique(pair_contig$ARG),
+                           MRG = unique(pair_contig$MRG),
+                           stringsAsFactors = FALSE)
+  
+  # --- Build per-treatment matrices ---
+  treatment_matrix_list <- list()
+  for (tr in levels(sample_group$Treatment)) {
+    tr_scores <- treat_scores %>%
+      filter(Treatment == tr) %>%
+      right_join(full_grid, by = c("ARG", "MRG")) %>%
+      mutate(weighted_mean = ifelse(is.na(weighted_mean) | weighted_mean <= 0.05,
+                                    NA, weighted_mean)) %>%
+      select(ARG, MRG, weighted_mean) %>%
+      pivot_wider(names_from = ARG, values_from = weighted_mean) %>%
+      column_to_rownames(var = "MRG") %>%
+      as.matrix()
+    treatment_matrix_list[[tr]] <- tr_scores
+  }
+  
+  # --- Build 3 subplots (one per treatment) ---
+  plot_list <- lapply(seq_along(treatment_matrix_list), function(i) {
+    tr  <- names(treatment_matrix_list)[i]
+    mat <- treatment_matrix_list[[tr]]
+    mat_df <- as.data.frame(mat) %>%
+      rownames_to_column("MRG") %>%
+      pivot_longer(cols = -MRG, names_to = "ARG", values_to = "weighted_mean")
+    
+    # ★ 修改点 1：将标题转换为带 <sub> 的 HTML 格式
+    tr_title <- dplyr::case_when(
+      tr == "N50cont" ~ "N50<sub>cont</sub>",
+      tr == "N50cess" ~ "N50<sub>cess</sub>",
+      TRUE            ~ tr
+    )
+    
+    p <- ggplot(mat_df, aes(x = ARG, y = MRG, fill = weighted_mean)) +
+      geom_tile(color = "black", linewidth = 0.5) +
+      geom_text(
+        aes(label = ifelse(!is.na(weighted_mean), round(weighted_mean, 1), "")),
+        size = 4.5, color = "black"
+      ) +
+      scale_y_discrete(
+        limits = sort(unique(mat_df$MRG), decreasing = TRUE),
+        labels = label_with_symbol
+      ) +
+      scale_fill_gradientn(
+        colors   = colorRampPalette(c("white", "yellow", "red"))(100),
+        limits   = c(0, max(treat_scores$weighted_mean, na.rm = TRUE)),
+        na.value = "white"
+      ) +
+      # ★ 使用 tr_title 替换原本的 tr
+      labs(title = tr_title, x = NULL, y = NULL,
+           fill = "Mean normalized coverage\nof ARG-MRG contigs (per Gb)") +
+      theme_minimal() +
+      theme(
+        panel.background = element_rect(fill = "white", color = NA),
+        plot.background  = element_rect(fill = "white", color = NA),
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5,
+                                   colour = "black", size = 13, face = "bold"),
+        # ★ 修改点 2：将 plot.title 改为 element_markdown() 以渲染 <sub>
+        plot.title  = element_markdown(hjust = 0.5, colour = "black",
+                                       size = 13, face = "bold"),
+        legend.position = "right",
+        legend.title = element_text(colour = "black", size = 13, face = "bold"),
+        panel.grid = element_blank()
+      )
+    
+    if (i == 1) {
+      p <- p + theme(axis.text.y = element_text(colour = "black",
+                                                size = 13, face = "bold"))
+    } else {
+      p <- p + theme(axis.text.y = element_blank(),
+                     axis.ticks.y = element_blank())
+    }
+    return(p)
+  })
+  
+  # --- Combine the 3 subplots into one figure ---
+  combined <- wrap_plots(plot_list, nrow = 1, ncol = 3) +
+    plot_layout(guides = "collect", widths = rep(1, 3)) +
+    plot_annotation(
+      title = plot_title,
+      theme = theme(plot.title = element_text(hjust = 0.5,
+                                              size = 16, face = "bold"))
+    )
+  return(combined)
+}
+
+# ======================
+# 3. Build the two figures
+# ======================
+xlsx_file <- "~/Desktop/codes/data/Ex_Fig1_data.xlsx"
+
+fig_a <- build_figure(
+  xlsx_file,
+  id_sheet    = "AMCC_ID",
+  abund_sheet = "AMCC_abundance",
+  plot_title  = "ARG-MRG co-localization on same contigs"
+)
+
+fig_b <- build_figure(
+  xlsx_file,
+  id_sheet    = "Plasmid_AMCC_ID",
+  abund_sheet = "Plasmid_AMCC_abundance",
+  plot_title  = "ARG-MRG co-localization on putative plasmid contigs"
+)
+
+# ======================
+# 4. Stack vertically with a / b tags
+# ======================
+final_plot <- wrap_plots(
+  wrap_elements(full = fig_a),
+  wrap_elements(full = fig_b),
+  ncol = 1
+) +
+  plot_annotation(tag_levels = list(c("a", "b"))) &
+  theme(plot.tag = element_text(size = 30, face = "bold"))
+
+print(final_plot)
+
+# ======================
+# 5. Save
+# ======================
+ggsave(
+  filename = "~/Desktop/codes/figures/Ex_Fig1ab.pdf",
+  plot     = final_plot,
+  width    = 18, height = 20, dpi = 300
+)
+```
+

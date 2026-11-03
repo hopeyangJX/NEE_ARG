@@ -1,0 +1,1776 @@
+---
+title: "Fig3"
+output: html_document
+date: "2026-10-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars,fig.width=27.5,fig.height=5}
+setwd("~/Desktop/codes")
+rm(list = ls())
+
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(agricolae)
+library(patchwork)
+library(car)
+library(ggtext)
+library(FSA)
+library(rcompanion)
+
+da <- read_excel("~/Desktop/codes/data/Fig3_data.xlsx", sheet = "Carbon")
+
+da$treatment2 <- factor(da$treatment2, 
+                        levels = c("N0-C0", "N50-C0", "N0-C2000", "N50-C2000"),
+                        labels = c("Control", "N", "C", "NC"))
+da$N <- factor(da$N, levels = c("N0", "N50"))
+da$C <- factor(da$C, levels = c("C0", "C2000"))
+
+indicators <- c("pH", "metals", "s_cn", "ARG", "MRG", "ABG")
+
+ylabs <- list(
+  s_cn   = "Soil C/N ratio",
+  pH     = "Soil pH",
+  metals = expression(bold("Heavy metals concentration (mg kg"^{-1}*")")),
+  ARG    = "Relative abundance of ARGs (\u00D7/Gb)",
+  MRG    = "Relative abundance of MRGs (\u00D7/Gb)",
+  ABG    = "Relative abundance of ABGs (\u00D7/Gb)"
+)
+
+col11 <- c("#7D7D7D", "#CC4125", "#F5C87A", "#8FD3F4")
+
+check_assumptions <- function(y, trt) {
+  df <- data.frame(y = y, trt = trt)
+  df <- df[!is.na(df$y), ]
+  
+  shapiro_p <- tapply(df$y, df$trt, function(x) {
+    if (length(x) >= 3 && length(x) <= 5000) shapiro.test(x)$p.value else NA
+  })
+  
+  levene_p <- tryCatch({
+    car::leveneTest(y ~ trt, data = df)$`Pr(>F)`[1]
+  }, error = function(e) NA)
+  
+  is_normal <- all(shapiro_p > 0.05, na.rm = TRUE)
+  is_equal_var <- !is.na(levene_p) && levene_p > 0.05
+  
+  return(is_normal & is_equal_var)
+}
+
+get_sig_labels <- function(y, trt, use_param) {
+  df <- data.frame(y = y, trt = trt)
+  df <- df[!is.na(df$y), ]
+  
+  if (use_param) {
+    fit <- aov(y ~ trt, data = df)
+    hsd <- agricolae::HSD.test(fit, "trt", console = FALSE)
+    res <- hsd$groups
+    res$grp <- rownames(res)
+    return(data.frame(grp = res$grp, sig_lab = res$groups))
+  } else {
+    dunn <- FSA::dunnTest(y ~ trt, data = df, method = "bh")
+    cld <- rcompanion::cldList(P.adj ~ Comparison, data = dunn$res, threshold = 0.05)
+    return(data.frame(grp = cld$Group, sig_lab = cld$Letter))
+  }
+}
+
+get_stat_text <- function(y, N, C, use_param) {
+  df_tmp <- data.frame(y = y, N = N, C = C)
+  df_tmp <- df_tmp[!is.na(df_tmp$y), ]
+  
+  fmt <- function(x) {
+    ifelse(is.na(x), "NA", 
+           ifelse(x == 0, "< 0.001",
+                  ifelse(x < 0.001, sprintf("%.1e", x), sprintf("%.3f", x))))
+  }
+  
+  if (use_param) {
+    fit <- aov(y ~ N * C, data = df_tmp)
+    s <- as.data.frame(car::Anova(fit, type = "III"))
+    
+    f1 <- fmt(s["N", "F value"]); p1 <- fmt(s["N", "Pr(>F)"])
+    f2 <- fmt(s["C", "F value"]); p2 <- fmt(s["C", "Pr(>F)"])
+    f3 <- fmt(s["N:C", "F value"]); p3 <- fmt(s["N:C", "Pr(>F)"])
+    
+    sprintf(
+      "<b>N</b>: <b><i>F</i></b> = <b>%s</b>, <b><i>p</i></b> = <b>%s</b><br><b>C</b>: <b><i>F</i></b> = <b>%s</b>, <b><i>p</i></b> = <b>%s</b>;  <b>N</b>&times;<b>C</b>: <b><i>F</i></b> = <b>%s</b>, <b><i>p</i></b> = <b>%s</b>",
+      f1, p1, f2, p2, f3, p3
+    )
+  } else {
+    srh <- rcompanion::scheirerRayHare(y ~ N * C, data = df_tmp, verbose = FALSE)
+    
+    h1 <- fmt(srh["N", "H"]); p1 <- fmt(srh["N", "p.value"])
+    h2 <- fmt(srh["C", "H"]); p2 <- fmt(srh["C", "p.value"])
+    h3 <- fmt(srh["N:C", "H"]); p3 <- fmt(srh["N:C", "p.value"])
+    
+    sprintf(
+      "<b>N</b>: <b><i>H</i></b> = <b>%s</b>, <b><i>p</i></b> = <b>%s</b><br><b>C</b>: <b><i>H</i></b> = <b>%s</b>, <b><i>p</i></b> = <b>%s</b>;  <b>N</b>&times;<b>C</b>: <b><i>H</i></b> = <b>%s</b>, <b><i>p</i></b> = <b>%s</b>",
+      h1, p1, h2, p2, h3, p3
+    )
+  }
+}
+
+plot_indicator <- function(yvar, df, ylab = yvar) {
+  df <- df[!is.na(df[[yvar]]), ]
+  
+  df$treatment2 <- factor(df$treatment2, levels = c("Control", "N", "C", "NC"))
+  df$N <- factor(df$N, levels = c("N0", "N50"))
+  df$C <- factor(df$C, levels = c("C0", "C2000"))
+  
+  use_param <- check_assumptions(df[[yvar]], df$treatment2)
+  cat(sprintf("Indicator [%s]: Meets normality and homogeneity assumptions? -> %s (Using %s)\n", 
+              yvar, use_param, ifelse(use_param, "Parametric test", "Non-parametric test")))
+  
+  lab <- get_sig_labels(df[[yvar]], df$treatment2, use_param)
+  anova_txt <- get_stat_text(df[[yvar]], df$N, df$C, use_param)
+  
+  ymin <- min(df[[yvar]], na.rm = TRUE)
+  ymax <- max(df[[yvar]], na.rm = TRUE)
+  yran <- ymax - ymin
+  
+  mx <- df %>%
+    group_by(treatment2) %>%
+    summarise(max_y = max(.data[[yvar]], na.rm = TRUE), .groups = "drop") %>%
+    mutate(max_y = max_y + 0.08 * yran)
+  
+  lab <- left_join(lab, mx, by = c("grp" = "treatment2"))
+  
+  p <- ggplot(df, aes(x = treatment2, y = .data[[yvar]], fill = treatment2)) +
+    geom_jitter(aes(color = treatment2), width = 0.15,
+                size = 5, alpha = 0.5, show.legend = FALSE) +
+    geom_boxplot(width = 0.5, alpha = 0.6, linewidth = 0.4, outlier.shape = NA) +
+    scale_fill_manual(values = col11) +        
+    scale_color_manual(values = col11) +       
+    geom_text(data = lab, aes(x = grp, y = max_y, label = sig_lab),
+              size = 4, fontface = "bold", inherit.aes = FALSE) +
+    labs(fill = "Treatment", x = "", y = ylab, title = anova_txt) +
+    theme_bw() +
+    theme(
+      plot.title   = element_markdown(colour = "black", size = 11, hjust = 0.5,
+                                      lineheight = 1.0, margin = margin(b = 6), family = "sans"),
+      legend.title = element_text(colour = "black", size = 14, face = "bold"),
+      legend.text  = element_text(colour = "black", size = 14, face = "bold"),
+      axis.text.x  = element_text(colour = "black", size = 14, face = "bold", angle = 0, hjust = 0.5, vjust = 1),
+      axis.text.y  = element_text(colour = "black", size = 14, face = "bold"),
+      axis.title.y = element_text(colour = "black", size = 14, face = "bold"),
+      panel.grid   = element_blank(),
+      panel.border = element_rect(fill = NA, color = "black", linewidth = 1, linetype = "solid")
+    )
+  
+  if (yvar == "pH") {
+    p <- p + scale_y_continuous(
+      limits = c(ymin - 0.05 * yran, ymax + 0.70 * yran),
+      expand = c(0, 0)
+    )
+  }
+  p
+}
+
+plot_list <- list()
+
+for (iv in indicators) {
+  plot_list[[iv]] <- plot_indicator(iv, da, ylab = ylabs[[iv]])
+}
+
+combined <- wrap_plots(plot_list, ncol = 6) +
+  plot_annotation(tag_levels = "a") &
+  theme(
+    legend.position = "none",
+    plot.tag        = element_text(size = 25, face = "bold", colour = "black")
+  )
+
+print(combined)
+
+ggsave("~/Desktop/codes/figures/Fig3a-f.pdf", combined,
+       width = 27.5, height = 5, dpi = 600,
+       device = cairo_pdf)
+```
+
+```{r,fig.width=8,fig.height=6}
+setwd("~/Desktop/codes")
+
+# ===== 0. Environment =====
+rm(list = ls())
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# ===== 1. Load data =====
+file  <- "~/Desktop/codes/data/Fig3_data.xlsx"
+abund <- read_excel(file, sheet = "C_MRG_abundance")
+meta  <- read_excel(file, sheet = "C_group")
+anno  <- read_excel(file, sheet = "C_MRG_ID")
+
+# ===== 2. Standardize column names =====
+colnames(abund)[1] <- "sample_id"
+colnames(meta)[1]  <- "sample_id"
+colnames(meta)[ncol(meta)] <- "treatment2"
+colnames(anno)[1] <- "gene_id"
+colnames(anno)[2] <- "MRG"
+
+# ===== 3. Wide-to-long abundance table =====
+abund_long <- abund %>%
+  pivot_longer(cols = -sample_id,
+               names_to  = "gene_id",
+               values_to = "abundance") %>%
+  mutate(
+    sample_id = as.character(sample_id),
+    gene_id   = sub("^X", "", as.character(gene_id)),
+    gene_id   = sub("\\.\\.\\..*$", "", gene_id),
+    abundance = as.numeric(abundance),
+    abundance = replace_na(abundance, 0)
+  ) %>%
+  group_by(sample_id, gene_id) %>%
+  summarise(abundance = sum(abundance, na.rm = TRUE),
+            .groups = "drop")
+
+# ===== 4. Clean annotation and treatment tables =====
+meta2 <- meta %>%
+  dplyr::select(sample_id, treatment2) %>%
+  mutate(sample_id  = as.character(sample_id),
+         treatment2 = as.character(treatment2)) %>%
+  filter(!is.na(treatment2)) %>%
+  distinct(sample_id, .keep_all = TRUE)
+
+anno2 <- anno %>%
+  dplyr::select(gene_id, MRG) %>%
+  mutate(gene_id = as.character(gene_id),
+         MRG     = as.character(MRG)) %>%
+  filter(!is.na(MRG), MRG != "") %>%
+  distinct(gene_id, .keep_all = TRUE)
+
+# ===== 5. Merge =====
+df <- abund_long %>%
+  left_join(anno2, by = "gene_id") %>%
+  left_join(meta2, by = "sample_id") %>%
+  filter(!is.na(treatment2)) %>%
+  mutate(MRG = replace_na(MRG, "Unclassified"))
+
+df$treatment2 <- factor(df$treatment2,
+                        levels = c("N0-C0", "N50-C0",
+                                   "N0-C2000", "N50-C2000"))
+
+cat("Original total abundance: ", sum(abund_long$abundance), "\n")
+cat("Merged total abundance: ", sum(df$abundance), "\n")
+print(table(df$treatment2))
+
+# ===== 6. Sum by MRG type within each sample =====
+df_sample_mrg <- df %>%
+  group_by(treatment2, sample_id, MRG) %>%
+  summarise(abundance = sum(abundance, na.rm = TRUE),
+            .groups = "drop")
+
+# Mean per MRG under each treatment
+bar_df <- df_sample_mrg %>%
+  group_by(treatment2, MRG) %>%
+  summarise(
+    mean = mean(abundance, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# ===== 7. Select MRGs to keep =====
+must_keep <- c("Iron", "Manganese", "Copper")
+
+mrg_rank <- bar_df %>%
+  group_by(MRG) %>%
+  summarise(mrg_total = sum(mean, na.rm = TRUE),
+            .groups = "drop") %>%
+  arrange(desc(mrg_total))
+
+top10    <- mrg_rank %>% slice_head(n = 10) %>% pull(MRG)
+keep_mrg <- union(top10, must_keep)
+
+cat("MRGs actually kept:\n")
+print(keep_mrg)
+cat("Number kept: ", length(keep_mrg), "\n")
+
+# ===== 7.1 Collapse the rest to "Others" =====
+bar_df <- bar_df %>%
+  mutate(MRG2 = ifelse(MRG %in% keep_mrg, MRG, "Others")) %>%
+  group_by(treatment2, MRG2) %>%
+  summarise(mean = sum(mean, na.rm = TRUE),
+            .groups = "drop") %>%
+  rename(MRG = MRG2)
+
+# ===== 7.2 Define top-down visual order: Top10 by mean descending + Others last =====
+mrg_order_top_down <- bar_df %>%
+  group_by(MRG) %>%
+  summarise(mrg_total = sum(mean, na.rm = TRUE),
+            .groups = "drop") %>%
+  filter(MRG != "Others") %>%
+  arrange(desc(mrg_total)) %>%
+  pull(MRG)
+
+mrg_order_top_down <- c(mrg_order_top_down, "Others")
+
+# Stacked bars are built from bottom to top; set levels directly to top-down order
+bar_df$MRG <- factor(bar_df$MRG, levels = mrg_order_top_down)
+
+# ===== 8. Define fixed colors for 21 metals + Unclassified + Others =====
+col_all <- c(
+  "Aluminium"    = "#4E79A7",
+  "Antimony"     = "#F28E2B",
+  "Arsenic"      = "#59A14F",
+  "Cadmium"      = "#E15759",
+  "Chromium"     = "#B07AA1",
+  "Cobalt"       = "#9C755F",
+  "Copper"       = "#F0A12C",   # orange-yellow
+  "Gold"         = "#BAB0AC",
+  "Iron"         = "#B02226",   # dark red
+  "Lead"         = "#FF9DA7",
+  "Magnesium"    = "#A0CBE8",
+  "Manganese"    = "#009E73",   # teal green
+  "Mercury"      = "#8CD17D",
+  "Molybdenum"   = "#F1CE63",
+  "Nickel"       = "#D4A6C8",
+  "Selenium"     = "#D7B5A6",
+  "Silver"       = "#FABFD2",
+  "Tellurium"    = "#C9C9C9",
+  "Tungsten"     = "#B6992D",
+  "Vanadium"     = "#86BCB6",
+  "Zinc"         = "#A6A6A6",
+  "Unclassified" = "#E8E8E8",
+  "Others"       = "#D3D3D3"
+)
+
+# Extract colors in top-down order (for legend)
+col_use <- col_all[mrg_order_top_down]
+
+# Fallback: if any MRG is not in col_all, fill with gray
+missing_col <- setdiff(mrg_order_top_down, names(col_use))
+if (length(missing_col) > 0) {
+  col_use <- c(col_use,
+               setNames(rep("#D3D3D3", length(missing_col)), missing_col))
+}
+
+# ===== 9. Plot =====
+# Define element symbol mapping
+element_symbols <- c(
+  "Aluminium" = "Al",
+  "Antimony"  = "Sb",
+  "Arsenic"   = "As",
+  "Cadmium"   = "Cd",
+  "Chromium"  = "Cr",
+  "Cobalt"    = "Co",
+  "Copper"    = "Cu",
+  "Gold"      = "Au",
+  "Iron"      = "Fe",
+  "Lead"      = "Pb",
+  "Magnesium" = "Mg",
+  "Manganese" = "Mn",
+  "Mercury"   = "Hg",
+  "Molybdenum"= "Mo",
+  "Nickel"    = "Ni",
+  "Selenium"  = "Se",
+  "Silver"    = "Ag",
+  "Tellurium" = "Te",
+  "Tungsten"  = "W",
+  "Vanadium"  = "V",
+  "Zinc"      = "Zn"
+)
+
+# Legend label function: add (symbol) if the metal is in the mapping, otherwise return as is
+label_with_symbol <- function(x) {
+  ifelse(x %in% names(element_symbols),
+         paste0(x, " (", element_symbols[x], ")"),
+         x)
+}
+
+# ---- x-axis labels: Control / N / C / N+C ----
+trt_labs <- c(
+  "N0-C0"     = "Control",
+  "N50-C0"    = "N",
+  "N0-C2000"  = "C",
+  "N50-C2000" = "N+C"
+)
+
+p1 <- ggplot(bar_df, aes(x = treatment2, y = mean, fill = MRG)) +
+  # Bar width consistent with the first code
+  geom_bar(stat = "identity", position = "stack",
+           width = 0.5, color = "black", linewidth = 0.2) +
+  # Add expand so spacing between treatments is consistent with the first code
+  scale_x_discrete(labels = trt_labs, expand = expansion(add = 0.3)) +
+  # Legend title consistent with the first code
+  labs(x = "", y = "Relative abundance of MRGs (×/Gb)",
+       fill = "Metal(loid) class") +
+  scale_fill_manual(values = col_use,
+                    breaks = mrg_order_top_down,
+                    labels = label_with_symbol) +
+  guides(fill = guide_legend(ncol = 1)) +
+  theme_bw() +
+  theme(
+    text          = element_text(size = 12, family = "sans"),
+    # Legend font consistent with the first code
+    legend.title  = element_text(colour = "black", size = 18, face = "bold"),
+    legend.text   = element_text(colour = "black", size = 18),
+    # y-axis font consistent with the first code
+    axis.text.y   = element_text(colour = "black", size = 14, face = "bold"),
+    axis.title.y  = element_text(colour = "black", size = 20, face = "bold"),
+    # x-axis font consistent with the first code: horizontally centered
+    axis.text.x   = element_text(colour = "black", size = 20, face = "bold",
+                                 angle = 0, hjust = 0.5, vjust = 1),
+    axis.title.x  = element_text(colour = "black", size = 18, face = "bold"),
+    panel.grid    = element_blank(),
+    panel.border  = element_rect(fill = NA, color = "black",
+                                 linewidth = 1, linetype = "solid")
+  )
+print(p1)
+ggsave("~/Desktop/codes/figures/Fig3g.pdf", p1,
+       width = 8, height = 6, dpi = 600)
+```
+
+```{r,fig.width=8,fig.height=6}
+setwd("~/Desktop/codes")
+
+# ===== 0. Environment =====
+rm(list = ls())
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(stringr)   # for wrapping legend labels
+
+# ===== 1. Load data =====
+file  <- "~/Desktop/codes/data/Fig3_data.xlsx"
+abund <- read_excel(file, sheet = "C_ARG_abundance")
+meta  <- read_excel(file, sheet = "C_group")
+anno  <- read_excel(file, sheet = "C_ARG_ID")
+
+# ===== 2. Standardize column names =====
+colnames(abund)[1] <- "sample_id"
+colnames(meta)[1]  <- "sample_id"
+colnames(meta)[ncol(meta)] <- "treatment2"
+colnames(anno)[1] <- "gene_id"
+colnames(anno)[4] <- "ARG"
+
+# ===== 3. Wide-to-long abundance table =====
+abund_long <- abund %>%
+  pivot_longer(cols = -sample_id,
+               names_to  = "gene_id",
+               values_to = "abundance") %>%
+  mutate(
+    sample_id = as.character(sample_id),
+    gene_id   = sub("^X", "", as.character(gene_id)),
+    gene_id   = sub("\\.\\.\\..*$", "", gene_id),
+    abundance = as.numeric(abundance),
+    abundance = replace_na(abundance, 0)
+  ) %>%
+  group_by(sample_id, gene_id) %>%
+  summarise(abundance = sum(abundance, na.rm = TRUE),
+            .groups = "drop")
+
+# ===== 4. Clean annotation and treatment tables =====
+meta2 <- meta %>%
+  select(sample_id, treatment2) %>%
+  mutate(sample_id  = as.character(sample_id),
+         treatment2 = as.character(treatment2)) %>%
+  filter(!is.na(treatment2)) %>%
+  distinct(sample_id, .keep_all = TRUE)
+
+anno2 <- anno %>%
+  select(gene_id, ARG) %>%
+  mutate(gene_id = as.character(gene_id),
+         ARG     = as.character(ARG)) %>%
+  filter(!is.na(ARG), ARG != "") %>%
+  distinct(gene_id, .keep_all = TRUE)
+
+# ===== 5. Merge =====
+df <- abund_long %>%
+  left_join(anno2, by = "gene_id") %>%
+  left_join(meta2, by = "sample_id") %>%
+  filter(!is.na(treatment2)) %>%
+  mutate(ARG = replace_na(ARG, "Unclassified"))
+
+df$treatment2 <- factor(df$treatment2,
+                        levels = c("N0-C0", "N50-C0",
+                                   "N0-C2000", "N50-C2000"))
+
+cat("Original total abundance: ", sum(abund_long$abundance), "\n")
+cat("Merged total abundance: ", sum(df$abundance), "\n")
+print(table(df$treatment2))
+
+# ===== 6. Sum by ARG type within each sample =====
+df_sample_arg <- df %>%
+  group_by(treatment2, sample_id, ARG) %>%
+  summarise(abundance = sum(abundance, na.rm = TRUE),
+            .groups = "drop")
+
+# Mean per ARG under each treatment
+bar_df <- df_sample_arg %>%
+  group_by(treatment2, ARG) %>%
+  summarise(
+    mean = mean(abundance, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# ===== 6.1 Keep only top 4 ARGs by abundance; collapse the rest to "Others" =====
+arg_rank <- bar_df %>%
+  group_by(ARG) %>%
+  summarise(arg_total = sum(mean, na.rm = TRUE),
+            .groups = "drop") %>%
+  arrange(desc(arg_total))
+
+top4_arg <- arg_rank %>% slice_head(n = 4) %>% pull(ARG)
+
+cat("Top 4 ARG types by abundance:\n")
+print(top4_arg)
+
+bar_df <- bar_df %>%
+  mutate(ARG2 = ifelse(ARG %in% top4_arg, ARG, "Others")) %>%
+  group_by(treatment2, ARG2) %>%
+  summarise(mean = sum(mean, na.rm = TRUE),
+            .groups = "drop") %>%
+  rename(ARG = ARG2)
+
+# ===== 6.2 Define stacking order: Top4 by mean descending + Others last =====
+arg_order_top_down <- bar_df %>%
+  group_by(ARG) %>%
+  summarise(arg_total = sum(mean, na.rm = TRUE),
+            .groups = "drop") %>%
+  filter(ARG != "Others") %>%
+  arrange(desc(arg_total)) %>%
+  pull(ARG)
+
+arg_order_top_down <- c(arg_order_top_down, "Others")
+
+bar_df$ARG <- factor(bar_df$ARG, levels = arg_order_top_down)
+
+# ===== 7. Color definitions =====
+col16 <- c(
+  "Multidrug"               = "#D65190",
+  "Glycopeptide"            = "#F38B2F",
+  "Rifamycin"               = "#F2E851",
+  "Tetracycline"            = "#088C00",
+  "Fluoroquinolone"         = "#025939",
+  "Beta-lactam"             = "#214EA7",
+  "Aminoglycoside"          = "#7552A7",
+  "Chloramphenicol"         = "#DB6C76",
+  "MLS"                     = "#8B511F",
+  "Phosphonic acid"         = "#A38277",
+  "Elfamycin"               = "#592E13",
+  "Isoniazid-like"          = "#6E86A5",
+  "Nitroimidazole"          = "#03C08B",
+  "Diaminopyrimidine"       = "#DCA0DD",
+  "Disinfecting agents and antiseptics" = "#BF7533",
+  "Unclassified"            = "#D3D3D3"
+)
+
+# Extract colors in stacking order: Top4 from col16, Others in gray
+col_use <- c()
+for (arg in arg_order_top_down) {
+  if (arg == "Others") {
+    col_use[arg] <- "#D3D3D3"
+  } else if (arg %in% names(col16)) {
+    col_use[arg] <- col16[arg]
+  } else {
+    col_use[arg] <- "#D3D3D3"  # fallback
+  }
+}
+
+# ===== 8. Plot =====
+# ---- x-axis labels: Control / N / C / N+C ----
+trt_labs <- c(
+  "N0-C0"     = "Control",
+  "N50-C0"    = "N",
+  "N0-C2000"  = "C",
+  "N50-C2000" = "N+C"
+)
+
+p1 <- ggplot(bar_df, aes(x = treatment2, y = mean, fill = ARG)) +
+  geom_bar(stat = "identity", position = "stack",
+           width = 0.5, color = "black", linewidth = 0.2) +
+  scale_x_discrete(labels = trt_labs, expand = expansion(add = 0.3)) +
+  # Legend title set to Drug class
+  labs(x = "", y = "Relative abundance of ARGs (×/Gb)", fill = "Drug class") +
+  scale_fill_manual(
+    values = col_use,
+    breaks = arg_order_top_down,
+    labels = function(x) str_wrap(x, width = 22)
+  ) +
+  guides(fill = guide_legend(ncol = 1)) +
+  theme_bw() +
+  theme(
+    text          = element_text(size = 12, family = "sans"),
+    # Legend font consistent with the first code
+    legend.title  = element_text(colour = "black", size = 18, face = "bold"),
+    legend.text   = element_text(colour = "black", size = 18),
+    # y-axis font consistent with the first code
+    axis.text.y   = element_text(colour = "black", size = 14, face = "bold"),
+    axis.title.y  = element_text(colour = "black", size = 20, face = "bold"),
+    # x-axis font consistent with the first code: horizontally centered
+    axis.text.x   = element_text(colour = "black", size = 20, face = "bold",
+                                 angle = 0, hjust = 0.5, vjust = 1),
+    axis.title.x  = element_text(colour = "black", size = 18, face = "bold"),
+    panel.grid    = element_blank(),
+    panel.border  = element_rect(fill = NA, color = "black",
+                                 linewidth = 1, linetype = "solid")
+  )
+print(p1)
+
+ggsave("~/Desktop/codes/figures/Fig3h.pdf", p1,
+       width = 8, height = 6, dpi = 600)
+```
+
+```{r,fig.width=8,fig.height=6}
+setwd("~/Desktop/codes")
+
+# ===== 0. Environment =====
+rm(list = ls())
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# ===== 1. Load data =====
+file  <- "~/Desktop/codes/data/Fig3_data.xlsx"
+abund <- read_excel(file, sheet = "C_ABG_abundance")
+meta  <- read_excel(file, sheet = "C_group")
+anno  <- read_excel(file, sheet = "C_ABG_ID")
+
+# ===== 2. Standardize column names =====
+colnames(abund)[1] <- "sample_id"
+colnames(meta)[1]  <- "sample_id"
+colnames(meta)[ncol(meta)] <- "treatment2"
+colnames(anno)[1] <- "gene_id"
+colnames(anno)[4] <- "ABG"
+
+# ===== 3. Wide-to-long abundance table =====
+abund_long <- abund %>%
+  pivot_longer(cols = -sample_id,
+               names_to  = "gene_id",
+               values_to = "abundance") %>%
+  mutate(
+    sample_id = as.character(sample_id),
+    gene_id   = sub("^X", "", as.character(gene_id)),
+    gene_id   = sub("\\.\\.\\..*$", "", gene_id),
+    abundance = as.numeric(abundance),
+    abundance = replace_na(abundance, 0)
+  ) %>%
+  group_by(sample_id, gene_id) %>%
+  summarise(abundance = sum(abundance, na.rm = TRUE),
+            .groups = "drop")
+
+# ===== 4. Clean annotation and treatment tables =====
+meta2 <- meta %>%
+  select(sample_id, treatment2) %>%
+  mutate(sample_id  = as.character(sample_id),
+         treatment2 = as.character(treatment2)) %>%
+  filter(!is.na(treatment2)) %>%
+  distinct(sample_id, .keep_all = TRUE)
+
+anno2 <- anno %>%
+  select(gene_id, ABG) %>%
+  mutate(gene_id = as.character(gene_id),
+         ABG     = as.character(ABG)) %>%
+  filter(!is.na(ABG), ABG != "") %>%
+  distinct(gene_id, .keep_all = TRUE)
+
+# ===== 5. Merge =====
+df <- abund_long %>%
+  left_join(anno2, by = "gene_id") %>%
+  left_join(meta2, by = "sample_id") %>%
+  filter(!is.na(treatment2)) %>%
+  mutate(ABG = replace_na(ABG, "Unclassified"))
+
+df$treatment2 <- factor(df$treatment2,
+                        levels = c("N0-C0", "N50-C0",
+                                   "N0-C2000", "N50-C2000"))
+
+cat("Original total abundance: ", sum(abund_long$abundance), "\n")
+cat("Merged total abundance: ", sum(df$abundance), "\n")
+print(table(df$treatment2))
+
+# ===== 6. Sum by sample + ABG, then mean by treatment + ABG =====
+df_sample_abg <- df %>%
+  group_by(treatment2, sample_id, ABG) %>%
+  summarise(abundance = sum(abundance, na.rm = TRUE),
+            .groups = "drop")
+
+bar_df <- df_sample_abg %>%
+  group_by(treatment2, ABG) %>%
+  summarise(mean = mean(abundance, na.rm = TRUE),
+            .groups = "drop")
+
+# ===== 7. Select ABGs to keep =====
+must_keep <- c("Aminoglycosides", "Tetracyclines",
+               "Beta-lactams", "Macrolides", "Glycopeptides")
+
+abg_rank <- bar_df %>%
+  group_by(ABG) %>%
+  summarise(abg_total = sum(mean, na.rm = TRUE),
+            .groups = "drop") %>%
+  arrange(desc(abg_total))
+
+top10    <- abg_rank %>% slice_head(n = 10) %>% pull(ABG)
+keep_abg <- union(top10, must_keep)
+
+cat("ABGs actually kept:\n")
+print(keep_abg)
+cat("Number kept: ", length(keep_abg), "\n")
+
+# ===== 7.1 Collapse the rest to "Others" =====
+bar_df <- bar_df %>%
+  ungroup() %>%
+  mutate(ABG2 = ifelse(ABG %in% keep_abg, ABG, "Others")) %>%
+  group_by(treatment2, ABG2) %>%
+  summarise(mean = sum(mean, na.rm = TRUE),
+            .groups = "drop") %>%
+  select(treatment2, ABG = ABG2, mean)
+
+cat("bar_df column names after collapsing:\n")
+print(colnames(bar_df))
+
+# ===== 7.2 Define top-down visual order: Top10 + 5 must-keep (by mean descending) + Others last =====
+abg_order_top_down <- bar_df %>%
+  group_by(ABG) %>%
+  summarise(abg_total = sum(mean, na.rm = TRUE),
+            .groups = "drop") %>%
+  filter(ABG != "Others") %>%
+  arrange(desc(abg_total)) %>%
+  pull(ABG)
+
+abg_order_top_down <- c(abg_order_top_down, "Others")
+
+# Stacked bars are built from bottom to top; set levels directly to top-down order
+bar_df$ABG <- factor(bar_df$ABG, levels = abg_order_top_down)
+
+# ===== 8. Define fixed colors for all ABG categories =====
+col_all <- c(
+  # ===== 5 highlighted classes (high saturation, high contrast) =====
+  "Aminoglycosides"          = "#D62728",  # bright red
+  "Tetracyclines"            = "#1F77B4",  # bright blue
+  "Beta-lactams"             = "#2CA02C",  # bright green
+  "Macrolides"               = "#FF7F0E",  # bright orange
+  "Glycopeptides"            = "#9467BD",  # bright purple
+  # ===== Other classes (lower saturation as background) =====
+  "Polyketides-Other"        = "#C49A9A",
+  "Polyketides-Aromatic"     = "#D9B38C",
+  "Polyketides-Polyethers"   = "#E0C68A",
+  "Polyketides-Angucyclines" = "#D9D08A",
+  "NRPs-Other"               = "#A9C4D9",
+  "NRPs-Cyclic Lipopeptides" = "#9DB8CC",
+  "NRPs-Linear Peptides"     = "#B8CFE0",
+  "NRPs-Depsipeptides"       = "#C9DCE8",
+  "Aminocoumarins"           = "#BFA48C",
+  "Enediynes"                = "#B9AED1",
+  "Lanthipeptides"           = "#9FC4C6",
+  "Nucleosides-Other"        = "#BFBFBF",
+  "Nucleosides-Purine"       = "#CCCCCC",
+  "Nucleosides-Pyrimidine"   = "#D9D9D9",
+  "Phenazines"               = "#8C8C8C",
+  "Others"                   = "#A6A6A6",
+  "Uncharacterized"          = "#DDDDDD",
+  "Unclassified"             = "#EEEEEE"
+)
+
+# Extract colors in top-down order (for legend)
+col_use <- col_all[abg_order_top_down]
+
+# Fallback: if any ABG is not in col_all, fill with gray
+missing_col <- setdiff(abg_order_top_down, names(col_use))
+if (length(missing_col) > 0) {
+  col_use <- c(col_use,
+               setNames(rep("#DDDDDD", length(missing_col)), missing_col))
+}
+
+# ===== 9. Plot =====
+# ---- x-axis labels: Control / N / C / N+C ----
+trt_labs <- c(
+  "N0-C0"     = "Control",
+  "N50-C0"    = "N",
+  "N0-C2000"  = "C",
+  "N50-C2000" = "N+C"
+)
+
+p1 <- ggplot(bar_df, aes(x = treatment2, y = mean, fill = ABG)) +
+  # Bar width set to 0.5, consistent with the second code
+  geom_bar(stat = "identity", position = "stack",
+           width = 0.5, color = "black", linewidth = 0.2) +
+  # Add expand, consistent with the second code
+  scale_x_discrete(labels = trt_labs, expand = expansion(add = 0.3)) +
+  # Legend title set to Compound class
+  labs(x = "", y = "Relative abundance of ABGs (×/Gb)", fill = "Compound class") +
+  scale_fill_manual(values = col_use,
+                    breaks = abg_order_top_down) +
+  guides(fill = guide_legend(ncol = 1)) +
+  theme_bw() +
+  theme(
+    text          = element_text(size = 12, family = "sans"),
+    # Font sizes refer to the second code
+    legend.title  = element_text(colour = "black", size = 18, face = "bold"),
+    legend.text   = element_text(colour = "black", size = 18),
+    axis.text.y   = element_text(colour = "black", size = 14, face = "bold"),
+    axis.title.y  = element_text(colour = "black", size = 20, face = "bold"),
+    axis.text.x   = element_text(colour = "black", size = 20, face = "bold",
+                                 angle = 0, hjust = 0.5, vjust = 1),
+    axis.title.x  = element_text(colour = "black", size = 18, face = "bold"),
+    panel.grid    = element_blank(),
+    panel.border  = element_rect(fill = NA, color = "black",
+                                 linewidth = 1, linetype = "solid")
+  )
+print(p1)
+
+ggsave("~/Desktop/codes/figures/Fig3i.pdf", p1,
+       width = 8, height = 6, dpi = 600)
+```
+
+```{r,fig.width=7,fig.height=7}
+rm(list = ls())
+setwd("~/Desktop/codes")
+
+library(readxl)
+library(vegan)
+library(ape)
+library(ggplot2)
+library(dplyr)
+library(tibble)
+library(ggtext)     # ← 用于渲染 HTML 富文本（粗体 + 斜体）
+
+# ==============================
+# 1. Load data
+# ==============================
+abundance <- read_excel("~/Desktop/codes/data/Fig3_data.xlsx", sheet = "C_MRG_abundance")
+group     <- read_excel("~/Desktop/codes/data/Fig3_data.xlsx", sheet = "C_group")
+
+abundance <- as.data.frame(abundance)
+rownames(abundance) <- abundance[[1]]
+abundance <- abundance[, -1]
+
+abundance[] <- lapply(abundance, function(x) as.numeric(as.character(x)))
+abundance[is.na(abundance)] <- 0
+
+group <- as.data.frame(group)
+rownames(group) <- group[[1]]
+group <- group[, -1]
+
+# ==============================
+# 2. Match samples
+# ==============================
+common_samples <- intersect(rownames(group), rownames(abundance))
+group     <- group[common_samples, , drop = FALSE]
+abundance <- abundance[common_samples, , drop = FALSE]
+
+group$C <- as.factor(group$C)
+group$N <- as.factor(group$N)
+group$treatment2 <- as.factor(group$treatment2)
+
+print(table(group$treatment2))
+print(table(group$C, group$N))
+
+# ==============================
+# 3. Hellinger transformation + Bray-Curtis distance
+# ==============================
+abundance_hel <- decostand(abundance, method = "hellinger")
+dist_bray <- vegdist(abundance_hel, method = "bray")
+
+if (any(is.na(dist_bray))) {
+  stop("NA found in distance matrix; please check abundance data.")
+}
+
+# ==============================
+# 4. adonis2 PERMANOVA
+# ==============================
+set.seed(315)
+adonis_result <- adonis2(
+  dist_bray ~ C + N + C:N,
+  data = group,
+  permutations = 9999,
+  by = "terms"
+)
+
+print(adonis_result)
+
+# ==============================================================================
+# Build HTML labels:
+#   - term letters (C, N, N×C): bold upright
+#   - R: bold italic; superscript 2: bold upright (²)
+#   - p: bold italic lowercase
+#   - numbers: bold
+# ==============================================================================
+adonis_annotate <- adonis_result %>%
+  as.data.frame() %>%
+  rownames_to_column("term") %>%
+  filter(!term %in% c("Residual", "Total")) %>%
+  mutate(
+    term = dplyr::case_match(term,
+                             "C"   ~ "C",
+                             "N"   ~ "N",
+                             "C:N" ~ "N&times;C",
+                             .default = term),
+    p_formatted = ifelse(
+      `Pr(>F)` < 0.001,
+      format(`Pr(>F)`, scientific = TRUE, digits = 3),
+      round(`Pr(>F)`, 3)
+    ),
+    # HTML label: whole label bold; R and p italic; ² upright
+    label = paste0(
+      "<b>", term, ": ",
+      "<i>R</i>² = ", round(R2, 3),
+      ", <i>p</i> = ", p_formatted,
+      "</b>"
+    )
+  ) %>%
+  mutate(term = factor(term, levels = c("N", "C", "N&times;C"))) %>%
+  arrange(term)
+
+# ---- Two lines: first line N and C, second line N×C ----
+#      Prefix "ARGs: " is bold; element_markdown() uses <br> for line breaks.
+adonis_annotate_twolines <- paste0(
+  "<b>MRGs: </b>",
+  paste(adonis_annotate$label[1:2], collapse = "   "),
+  "<br>",
+  adonis_annotate$label[3]
+)
+
+# ==============================
+# 5. PCoA
+# ==============================
+set.seed(315)
+bac.pc <- pcoa(dist_bray)
+
+pc1 <- round(bac.pc$values$Relative_eig[1], 3) * 100
+pc2 <- round(bac.pc$values$Relative_eig[2], 3) * 100
+
+envpc <- data.frame(group, bac.pc$vectors)
+
+envpc$C <- factor(envpc$C, levels = c("C0", "C2000"))
+envpc$N <- factor(envpc$N, levels = c("N0", "N50"))
+envpc$treatment2 <- factor(
+  envpc$treatment2,
+  levels = c("N0-C0", "N50-C0", "N0-C2000", "N50-C2000")
+)
+
+# ==============================
+# 6. Plot
+# ==============================
+
+col11 <- c(
+  "N0-C0"     = "#7D7D7D",
+  "N50-C0"    = "#CC4125",
+  "N0-C2000"  = "#F5C87A",
+  "N50-C2000" = "#8FD3F4"
+)
+
+trt_labs <- c(
+  "N0-C0"     = "Control",
+  "N50-C0"    = "N",
+  "N0-C2000"  = "C",
+  "N50-C2000" = "N+C"
+)
+
+lines <- c("N0" = "dotted", "N50" = "solid")
+
+p1 <- ggplot(
+  data = envpc,
+  aes(x = Axis.1, y = Axis.2,
+      colour = treatment2,
+      linetype = N)
+) +
+  geom_point(alpha = 0.8, size = 8, shape = 19) +
+  scale_colour_manual(
+    values = col11,
+    labels = trt_labs,
+    name   = "Treatment"
+  ) +
+  scale_linetype_manual(
+    values = lines,
+    name   = "N"
+  ) +
+  labs(
+    x = sprintf("PCo1 (%.1f%%)", pc1),
+    y = sprintf("PCo2 (%.1f%%)", pc2),
+    title = adonis_annotate_twolines   # ← 统计结果放在 title
+  ) +
+  theme_bw() +
+  guides(
+    colour = guide_legend(
+      title = "Treatment",
+      override.aes = list(shape = 19, linetype = 0, size = 5),
+      ncol = 1
+    ),
+    linetype = guide_legend(
+      title = "N",
+      override.aes = list(linetype = c("dotted", "solid"),
+                          alpha = 0.5, linewidth = 1.3),
+      ncol = 1
+    )
+  ) +
+  theme(
+    text = element_text(size = 18, family = "sans", face = "bold"),
+    axis.text = element_text(size = 16, face = "bold"),
+    axis.title = element_text(size = 20, face = "bold"),
+    panel.border = element_rect(fill = NA, color = "black",
+                                linewidth = 1.2, linetype = "solid"),
+    
+    # ===== HTML 渲染：title 现在是统计结果 =====
+    plot.title = element_markdown(
+      hjust = 0.5,
+      size = 15,
+      family = "sans",
+      colour = "black",
+      lineheight = 1.2,
+      margin = margin(t = 0, b = 10)
+    ),
+    
+    legend.position      = c(0.01, 0.01),
+    legend.justification = c(0, 0),
+    legend.background    = element_rect(fill = alpha("white", 0.6),
+                                        colour = NA),
+    legend.key           = element_blank(),
+    legend.margin        = margin(2, 4, 2, 4),
+    legend.spacing.y     = unit(0.1, "cm"),
+    legend.title         = element_text(colour = "black", size = 16,
+                                        face = "bold"),
+    legend.text          = element_text(colour = "black", size = 16,
+                                        face = "bold"),
+    
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10)
+  )
+
+print(p1)
+ggsave("~/Desktop/codes/figures/Fig3j.pdf", p1,
+       width = 7, height = 7, device = cairo_pdf)
+```
+
+```{r,fig.width=7,fig.height=7}
+rm(list = ls())
+setwd("~/Desktop/codes")
+
+library(readxl)
+library(vegan)
+library(ape)
+library(ggplot2)
+library(dplyr)
+library(tibble)
+library(ggtext)     # ← 用于渲染 HTML 富文本（粗体 + 斜体）
+
+# ==============================
+# 1. Load data
+# ==============================
+abundance <- read_excel("~/Desktop/codes/data/Fig3_data.xlsx", sheet = "C_ARG_abundance")
+group     <- read_excel("~/Desktop/codes/data/Fig3_data.xlsx", sheet = "C_group")
+
+abundance <- as.data.frame(abundance)
+rownames(abundance) <- abundance[[1]]
+abundance <- abundance[, -1]
+
+abundance[] <- lapply(abundance, function(x) as.numeric(as.character(x)))
+abundance[is.na(abundance)] <- 0
+
+group <- as.data.frame(group)
+rownames(group) <- group[[1]]
+group <- group[, -1]
+
+# ==============================
+# 2. Match samples
+# ==============================
+common_samples <- intersect(rownames(group), rownames(abundance))
+group     <- group[common_samples, , drop = FALSE]
+abundance <- abundance[common_samples, , drop = FALSE]
+
+group$C <- as.factor(group$C)
+group$N <- as.factor(group$N)
+group$treatment2 <- as.factor(group$treatment2)
+
+print(table(group$treatment2))
+print(table(group$C, group$N))
+
+# ==============================
+# 3. Hellinger transformation + Bray-Curtis distance
+# ==============================
+abundance_hel <- decostand(abundance, method = "hellinger")
+dist_bray <- vegdist(abundance_hel, method = "bray")
+
+if (any(is.na(dist_bray))) {
+  stop("NA found in distance matrix; please check abundance data.")
+}
+
+# ==============================
+# 4. adonis2 PERMANOVA
+# ==============================
+set.seed(315)
+adonis_result <- adonis2(
+  dist_bray ~ C + N + C:N,
+  data = group,
+  permutations = 9999,
+  by = "terms"
+)
+
+print(adonis_result)
+
+# ==============================================================================
+# Build HTML labels:
+#   - term letters (C, N, N×C): bold upright
+#   - R: bold italic uppercase; superscript 2: bold upright (²)
+#   - p: bold italic lowercase
+#   - numbers: bold
+# ==============================================================================
+adonis_annotate <- adonis_result %>%
+  as.data.frame() %>%
+  rownames_to_column("term") %>%
+  filter(!term %in% c("Residual", "Total")) %>%
+  mutate(
+    term = dplyr::case_match(term,
+                             "C"   ~ "C",
+                             "N"   ~ "N",
+                             "C:N" ~ "N&times;C",
+                             .default = term),
+    p_formatted = ifelse(
+      `Pr(>F)` < 0.001,
+      format(`Pr(>F)`, scientific = TRUE, digits = 3),
+      round(`Pr(>F)`, 3)
+    ),
+    # HTML label: whole label bold; R and p italic; ² upright
+    label = paste0(
+      "<b>", term, ": ",
+      "<i>R</i>² = ", round(R2, 3),
+      ", <i>p</i> = ", p_formatted,
+      "</b>"
+    )
+  ) %>%
+  mutate(term = factor(term, levels = c("N", "C", "N&times;C"))) %>%
+  arrange(term)
+
+# ---- Two lines: first line N and C, second line N×C ----
+#      Prefix "ARGs: " is bold; element_markdown() uses <br> for line breaks.
+adonis_annotate_twolines <- paste0(
+  "<b>ARGs: </b>",
+  paste(adonis_annotate$label[1:2], collapse = "   "),
+  "<br>",
+  adonis_annotate$label[3]
+)
+
+# ==============================
+# 5. PCoA
+# ==============================
+set.seed(315)
+bac.pc <- pcoa(dist_bray)
+
+pc1 <- round(bac.pc$values$Relative_eig[1], 3) * 100
+pc2 <- round(bac.pc$values$Relative_eig[2], 3) * 100
+
+envpc <- data.frame(group, bac.pc$vectors)
+
+envpc$C <- factor(envpc$C, levels = c("C0", "C2000"))
+envpc$N <- factor(envpc$N, levels = c("N0", "N50"))
+envpc$treatment2 <- factor(
+  envpc$treatment2,
+  levels = c("N0-C0", "N50-C0", "N0-C2000", "N50-C2000")
+)
+
+# ==============================
+# 6. Plot
+# ==============================
+
+col11 <- c(
+  "N0-C0"     = "#7D7D7D",
+  "N50-C0"    = "#CC4125",
+  "N0-C2000"  = "#F5C87A",
+  "N50-C2000" = "#8FD3F4"
+)
+
+trt_labs <- c(
+  "N0-C0"     = "Control",
+  "N50-C0"    = "N",
+  "N0-C2000"  = "C",
+  "N50-C2000" = "N+C"
+)
+
+lines <- c("N0" = "dotted", "N50" = "solid")
+
+p1 <- ggplot(
+  data = envpc,
+  aes(x = Axis.1, y = Axis.2,
+      colour = treatment2,
+      linetype = N)
+) +
+  geom_point(alpha = 0.8, size = 8, shape = 19) +
+  scale_colour_manual(
+    values = col11,
+    labels = trt_labs,
+    name   = "Treatment"
+  ) +
+  scale_linetype_manual(
+    values = lines,
+    name   = "N"
+  ) +
+  labs(
+    x = sprintf("PCo1 (%.1f%%)", pc1),
+    y = sprintf("PCo2 (%.1f%%)", pc2),
+    subtitle = adonis_annotate_twolines
+  ) +
+  theme_bw() +
+  guides(
+    colour = guide_legend(
+      title = "Treatment",
+      override.aes = list(shape = 19, linetype = 0, size = 5),
+      ncol = 1
+    ),
+    linetype = guide_legend(
+      title = "N",
+      override.aes = list(linetype = c("dotted", "solid"),
+                          alpha = 0.5, linewidth = 1.3),
+      ncol = 1
+    )
+  ) +
+  theme(
+    text = element_text(size = 18, family = "sans", face = "bold"),
+    axis.text = element_text(size = 16, face = "bold"),
+    axis.title = element_text(size = 20, face = "bold"),
+    panel.border = element_rect(fill = NA, color = "black",
+                                linewidth = 1.2, linetype = "solid"),
+    
+    # ===== HTML 渲染：粗体 + 斜体 + 上标 =====
+    plot.subtitle = element_markdown(
+      hjust = 0.5,
+      size = 15,
+      family = "sans",
+      colour = "black",
+      lineheight = 1.2,
+      margin = margin(t = 0, b = 10)
+    ),
+    
+    legend.position      = c(0.01, 0.01),
+    legend.justification = c(0, 0),
+    legend.background    = element_rect(fill = alpha("white", 0.6),
+                                        colour = NA),
+    legend.key           = element_blank(),
+    legend.margin        = margin(2, 4, 2, 4),
+    legend.spacing.y     = unit(0.1, "cm"),
+    legend.title         = element_text(colour = "black", size = 16,
+                                        face = "bold"),
+    legend.text          = element_text(colour = "black", size = 16,
+                                        face = "bold"),
+    
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10)
+  )
+
+print(p1)
+
+ggsave("~/Desktop/codes/figures/Fig3k.pdf", p1,
+       width = 7, height = 7, device = cairo_pdf)
+```
+
+```{r,fig.width=7,fig.height=7}
+rm(list = ls())
+setwd("~/Desktop/codes")
+library(readxl)
+library(vegan)
+library(ape)
+library(ggplot2)
+library(dplyr)
+library(tibble)
+library(ggtext)     # ← 用于渲染 HTML 富文本（粗体 + 斜体）
+
+# ==============================
+# 1. Load data
+# ==============================
+abundance <- read_excel("~/Desktop/codes/data/Fig3_data.xlsx", sheet = "C_ABG_abundance")
+group     <- read_excel("~/Desktop/codes/data/Fig3_data.xlsx", sheet = "C_group")
+
+abundance <- as.data.frame(abundance)
+rownames(abundance) <- abundance[[1]]
+abundance <- abundance[, -1]
+
+abundance[] <- lapply(abundance, function(x) as.numeric(as.character(x)))
+abundance[is.na(abundance)] <- 0
+
+group <- as.data.frame(group)
+rownames(group) <- group[[1]]
+group <- group[, -1]
+
+# ==============================
+# 2. Match samples
+# ==============================
+common_samples <- intersect(rownames(group), rownames(abundance))
+group     <- group[common_samples, , drop = FALSE]
+abundance <- abundance[common_samples, , drop = FALSE]
+
+group$C <- as.factor(group$C)
+group$N <- as.factor(group$N)
+group$treatment2 <- as.factor(group$treatment2)
+
+print(table(group$treatment2))
+print(table(group$C, group$N))
+
+# ==============================
+# 3. Hellinger transformation + Bray-Curtis distance
+# ==============================
+abundance_hel <- decostand(abundance, method = "hellinger")
+dist_bray <- vegdist(abundance_hel, method = "bray")
+
+if (any(is.na(dist_bray))) {
+  stop("NA found in distance matrix; please check abundance data.")
+}
+
+# ==============================
+# 4. adonis2 PERMANOVA
+# ==============================
+set.seed(315)
+adonis_result <- adonis2(
+  dist_bray ~ C + N + C:N,
+  data = group,
+  permutations = 9999,
+  by = "terms"
+)
+
+print(adonis_result)
+
+# ==============================================================================
+# Build HTML labels:
+#   - term letters (C, N, N×C): bold upright
+#   - R: bold italic uppercase; superscript 2: bold upright (²)
+#   - p: bold italic lowercase
+#   - numbers: bold
+# ==============================================================================
+adonis_annotate <- adonis_result %>%
+  as.data.frame() %>%
+  rownames_to_column("term") %>%
+  filter(!term %in% c("Residual", "Total")) %>%
+  mutate(
+    term = dplyr::case_match(term,
+                             "C"   ~ "C",
+                             "N"   ~ "N",
+                             "C:N" ~ "N&times;C",
+                             .default = term),
+    p_formatted = ifelse(
+      `Pr(>F)` < 0.001,
+      format(`Pr(>F)`, scientific = TRUE, digits = 3),
+      round(`Pr(>F)`, 3)
+    ),
+    label = paste0(
+      "<b>", term, ": ",
+      "<i>R</i>² = ", round(R2, 3),
+      ", <i>p</i> = ", p_formatted,
+      "</b>"
+    )
+  ) %>%
+  mutate(term = factor(term, levels = c("N", "C", "N&times;C"))) %>%
+  arrange(term)
+
+# ---- Two lines: first line N and C, second line N×C ----
+#      Prefix "ABGs: " is bold; element_markdown() uses <br> for line breaks.
+adonis_annotate_twolines <- paste0(
+  "<b>ABGs: </b>",
+  paste(adonis_annotate$label[1:2], collapse = "   "),
+  "<br>",
+  adonis_annotate$label[3]
+)
+
+# ==============================
+# 5. PCoA
+# ==============================
+set.seed(315)
+bac.pc <- pcoa(dist_bray)
+
+pc1 <- round(bac.pc$values$Relative_eig[1], 3) * 100
+pc2 <- round(bac.pc$values$Relative_eig[2], 3) * 100
+
+envpc <- data.frame(group, bac.pc$vectors)
+
+envpc$C <- factor(envpc$C, levels = c("C0", "C2000"))
+envpc$N <- factor(envpc$N, levels = c("N0", "N50"))
+envpc$treatment2 <- factor(
+  envpc$treatment2,
+  levels = c("N0-C0", "N50-C0", "N0-C2000", "N50-C2000")
+)
+
+# ==============================
+# 6. Plot
+# ==============================
+
+col11 <- c(
+  "N0-C0"     = "#7D7D7D",
+  "N50-C0"    = "#CC4125",
+  "N0-C2000"  = "#F5C87A",
+  "N50-C2000" = "#8FD3F4"
+)
+
+trt_labs <- c(
+  "N0-C0"     = "Control",
+  "N50-C0"    = "N",
+  "N0-C2000"  = "C",
+  "N50-C2000" = "N+C"
+)
+
+lines <- c("N0" = "dotted", "N50" = "solid")
+
+p1 <- ggplot(
+  data = envpc,
+  aes(x = Axis.1, y = Axis.2,
+      colour = treatment2,
+      linetype = N)
+) +
+  geom_point(alpha = 0.8, size = 8, shape = 19) +
+  scale_colour_manual(
+    values = col11,
+    labels = trt_labs,
+    name   = "Treatment"
+  ) +
+  scale_linetype_manual(
+    values = lines,
+    name   = "N"
+  ) +
+  labs(
+    x = sprintf("PCo1 (%.1f%%)", pc1),
+    y = sprintf("PCo2 (%.1f%%)", pc2),
+    subtitle = adonis_annotate_twolines
+  ) +
+  theme_bw() +
+  guides(
+    colour = guide_legend(
+      title = "Treatment",
+      override.aes = list(shape = 19, linetype = 0, size = 5),
+      ncol = 1
+    ),
+    linetype = guide_legend(
+      title = "N",
+      override.aes = list(linetype = c("dotted", "solid"),
+                          alpha = 0.5, linewidth = 1.3),
+      ncol = 1
+    )
+  ) +
+  theme(
+    text = element_text(size = 18, family = "sans", face = "bold"),
+    axis.text = element_text(size = 16, face = "bold"),
+    axis.title = element_text(size = 20, face = "bold"),
+    panel.border = element_rect(fill = NA, color = "black",
+                                linewidth = 1.2, linetype = "solid"),
+    
+    # ===== HTML 渲染：粗体 + 斜体 + 上标 =====
+    plot.subtitle = element_markdown(
+      hjust = 0.5,
+      size = 15,
+      family = "sans",
+      colour = "black",
+      lineheight = 1.2,
+      margin = margin(t = 0, b = 10)
+    ),
+    
+    legend.position      = c(0.01, 0.01),
+    legend.justification = c(0, 0),
+    legend.background    = element_rect(fill = alpha("white", 0.6),
+                                        colour = NA),
+    legend.key           = element_blank(),
+    legend.margin        = margin(2, 4, 2, 4),
+    legend.spacing.y     = unit(0.1, "cm"),
+    legend.title         = element_text(colour = "black", size = 16,
+                                        face = "bold"),
+    legend.text          = element_text(colour = "black", size = 16,
+                                        face = "bold"),
+    
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10)
+  )
+
+print(p1)
+ggsave("~/Desktop/codes/figures/Fig3l.pdf", p1,
+       width = 7, height = 7, device = cairo_pdf)
+```
+
+```{r,fig.width=11,fig.height=5}
+rm(list = ls())
+setwd("~/Desktop/codes")
+
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(ggtext)     # ← 用于渲染 HTML 富文本（粗体 + 斜体 + 希腊字母）
+
+# ==============================
+# 1. Load data
+# ==============================
+dat <- read_excel("~/Desktop/codes/data/Fig3_data.xlsx", sheet = "Carbon") %>% as.data.frame()
+
+str(dat)
+
+dat$treatment2 <- factor(dat$treatment2,
+                         levels = c("N0-C0", "N50-C0",
+                                    "N0-C2000", "N50-C2000"))
+
+# ==============================
+# 2. Data preparation
+# ==============================
+dat$ARG <- as.numeric(as.character(dat$ARG))
+dat$MRG <- as.numeric(as.character(dat$MRG))
+dat$ABG <- as.numeric(as.character(dat$ABG))
+
+dat <- dat[complete.cases(dat[, c("ARG", "MRG", "ABG")]), ]
+dat <- dat[dat$ARG > 0 & dat$MRG > 0 & dat$ABG > 0, ]
+
+cat("Number of samples used for analysis: ", nrow(dat), "\n")
+print(table(dat$treatment2))
+
+# ==============================
+# 3. Distribution check
+# ==============================
+#par(mfrow = c(1, 3))
+#hist(dat$ARG, main = "ARG"); hist(dat$MRG, main = "MRG"); hist(dat$ABG, main = "ABG")
+#par(mfrow = c(1, 1))
+
+# ==============================
+# 4. Simple correlation (Spearman)
+# ==============================
+sc_ARG_MRG <- cor.test(dat$ARG, dat$MRG, method = "spearman")
+sc_ARG_ABG <- cor.test(dat$ARG, dat$ABG, method = "spearman")
+
+cat(sprintf("ARG-MRG (simple): rho = %.3f, p = %.4g\n",
+            sc_ARG_MRG$estimate, sc_ARG_MRG$p.value))
+cat(sprintf("ARG-ABG (simple): rho = %.3f, p = %.4g\n",
+            sc_ARG_ABG$estimate, sc_ARG_ABG$p.value))
+
+# ==============================
+# 5. Colors and legend labels
+# ==============================
+col11 <- c("#7D7D7D", "#CC4125", "#F5C87A", "#8FD3F4")
+names(col11) <- c("N0-C0", "N50-C0", "N0-C2000", "N50-C2000")
+
+trt_labs <- c(
+  "N0-C0"     = "Control",
+  "N50-C0"    = "N",
+  "N0-C2000"  = "C",
+  "N50-C2000" = "N+C"
+)
+
+# ==============================
+# 6. Utility functions
+# ==============================
+sig_mark <- function(P) {
+  ifelse(P < 0.001, "***",
+         ifelse(P < 0.01, "**",
+                ifelse(P < 0.05, "*", "ns")))
+}
+
+# Format p value
+format_p <- function(p) {
+  ifelse(p < 0.001,
+         sprintf("%.1e", p),   # scientific notation, 1 decimal place
+         sprintf("%.3f", p))   # regular number, 3 decimal places
+}
+
+make_plot <- function(df, xvar, yvar, panel_title, xlab, ylab,
+                      rho, P, prefix) {
+  # HTML label:
+  #   - rho: lower-case Greek letter, bold italic  -> <i>&rho;</i>
+  #   - p  : lower-case, bold italic               -> <i>p</i>
+  #   - numbers and punctuation: bold upright
+  #   - whole label wrapped in <b>...</b>
+  lab <- sprintf(
+    "<b>%s: <i>&rho;</i> = %.2f, <i>p</i> = %s %s</b>",
+    prefix, rho, format_p(P), sig_mark(P)
+  )
+  
+  ggplot(df, aes(x = .data[[xvar]], y = .data[[yvar]],
+                 color = treatment2)) +
+    geom_point(shape = 19, size = 7, alpha = 0.8) +
+    geom_smooth(aes(group = 1),
+                method = "lm", se = TRUE,
+                color = "black", linewidth = 1) +
+    scale_color_manual(
+      values = col11,
+      labels = trt_labs,
+      name   = "Treatment"
+    ) +
+    labs(x = xlab, y = ylab,
+         title = panel_title,
+         subtitle = lab) +
+    theme_bw() +
+    theme(
+      plot.title    = element_text(size = 15, face = "bold",
+                                   hjust = 0.5,
+                                   margin = margin(t = 5, b = 4)),
+      # ===== HTML 渲染：粗体 + 斜体 + 希腊字母 =====
+      plot.subtitle = element_markdown(size = 12,
+                                       hjust = 0.5,
+                                       colour = "black",
+                                       margin = margin(t = 0, b = 10)),
+      axis.text    = element_text(size = 11, face = "bold", colour = "black"),
+      axis.title   = element_text(size = 13, face = "bold"),
+      legend.title = element_text(size = 14, face = "bold"),
+      legend.text  = element_text(size = 14),
+      panel.grid   = element_blank(),
+      panel.border = element_rect(fill = NA, color = "black", linewidth = 1),
+      plot.margin  = margin(t = 10, r = 10, b = 10, l = 10)
+    )
+}
+
+# ==============================
+# 7. Plot 1: ARG vs MRG
+# ==============================
+p_MRG <- make_plot(
+  df = dat,
+  xvar = "MRG", yvar = "ARG",
+  panel_title = "ARGs vs MRGs",
+  xlab = "Relative abundance of MRGs (\u00d7/Gb)",
+  ylab = "Relative abundance of ARGs (\u00d7/Gb)",
+  rho = sc_ARG_MRG$estimate, P = sc_ARG_MRG$p.value,
+  prefix = "Spearman"
+)
+
+# ==============================
+# 8. Plot 2: ARG vs ABG
+# ==============================
+p_ABG <- make_plot(
+  df = dat,
+  xvar = "ABG", yvar = "ARG",
+  panel_title = "ARGs vs ABGs",
+  xlab = "Relative abundance of ABGs (\u00d7/Gb)",
+  ylab = "Relative abundance of ARGs (\u00d7/Gb)",
+  rho = sc_ARG_ABG$estimate, P = sc_ARG_ABG$p.value,
+  prefix = "Spearman"
+)
+
+# ==============================
+# 9. Combine plots + shared legend
+# ==============================
+combined <- p_MRG + p_ABG +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "right")
+
+print(combined)
+
+# ==============================
+# 10. Save combined figure
+# ==============================
+ggsave("~/Desktop/codes/figures/Fig3mn.pdf", combined,
+       width = 11, height = 5, dpi = 600,
+       device = cairo_pdf)
+```
+
+```{r,fig.width=18,fig.height=5}
+rm(list=ls())
+setwd("~/Desktop/codes")
+
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(stringr)
+library(ggthemes)
+library(ggtext)
+
+# ====================== 1. Read data + robust cleaning ======================
+plot_data <- read_excel("~/Desktop/codes/data/Fig3_data.xlsx", sheet = "ARG_ABG")
+plot_data[is.na(plot_data)] <- ""
+
+plot_data <- plot_data %>%
+  mutate(
+    Subgroup = str_squish(Subgroup),
+    group1 = str_squish(group1),
+    group2 = str_squish(group2),
+    Subgroup_short = case_when(
+      str_detect(Subgroup, "unadded") ~ "unadded",
+      str_detect(Subgroup, "added") ~ "added"
+    )
+  )
+
+# ====================== 2. Build combined X-axis variable ======================
+plot_data$x_cat <- paste(plot_data$Subgroup_short, plot_data$group2, sep = "|")
+x_levels <- c("unadded|ARG", "unadded|ABG", "added|ARG", "added|ABG")
+plot_data$x_cat <- factor(plot_data$x_cat, levels = x_levels)
+
+# ====================== 3. Facet grouping settings ======================
+facet_order <- c("Total", "Tetracyclines", "Glycopepeptides", "MLS", "Aminoglycosides", "Beta_lactams")
+plot_data <- plot_data %>% filter(group1 %in% facet_order)
+plot_data$group1 <- factor(plot_data$group1, levels = facet_order)
+
+# ====================== 4. Significance labels + p-value formatting ======================
+plot_data$significant <- ifelse(plot_data$pval < 0.05, "Significant", "Non-significant")
+
+# FIX: </b> moved AFTER the number so that "p", "=", and digits are all bold.
+#      "p" is additionally italic; "=" and digits stay upright.
+plot_data$p_label <- ifelse(
+  plot_data$pval < 0.05,
+  sprintf("<b><i>p</i>=%s</b>", formatC(plot_data$pval, format = "e", digits = 1)),
+  sprintf("<b><i>p</i>=%.3f</b>", plot_data$pval)
+)
+
+# ====================== 5. Red/blue background block data ======================
+bg_data <- expand.grid(
+  group1 = facet_order,
+  side = c("Red", "Blue")
+) %>%
+  mutate(
+    xmin = ifelse(side == "Red", 0.5, 2.5),
+    xmax = ifelse(side == "Red", 2.5, 4.5),
+    carbon_group = ifelse(side == "Red", "Labile carbon unadded", "Labile carbon added"),
+    x_center = ifelse(side == "Red", 1.5, 3.5),
+    display_label = ifelse(side == "Red", "Labile carbon\nunadded", "Labile carbon\nadded")
+  )
+bg_data$group1 <- factor(bg_data$group1, levels = facet_order)
+
+# ====================== 6. Plotting code ======================
+p <- ggplot(plot_data, aes(x = x_cat, y = estimate)) +
+  facet_wrap(. ~ group1, ncol = 6, drop = TRUE) +
+  
+  geom_rect(data = bg_data,
+            aes(xmin = xmin, xmax = xmax, ymin = -Inf, ymax = Inf, fill = carbon_group),
+            alpha = 0.5, inherit.aes = FALSE) +
+  scale_fill_manual(
+    values = c("Labile carbon unadded" = "#D55535",
+               "Labile carbon added"   = "#2A77AC"),
+    guide = "none"
+  ) +
+  
+  geom_text(data = bg_data,
+            aes(x = x_center, y = Inf, label = display_label),
+            vjust = 1.2, size = 3.8, fontface = "bold", color = "black",
+            lineheight = 0.9,
+            inherit.aes = FALSE) +
+  
+  geom_errorbar(aes(ymax = estimate + se,
+                    ymin = estimate - se),
+                width = 0, linewidth = 2.5, alpha = 0.5, color = "black") +
+  
+  geom_point(aes(shape = significant),
+             size = 6, stroke = 1.2, alpha = 0.8, color = "purple", fill = "white") +
+  
+  geom_richtext(aes(y = estimate + se, label = p_label),
+                size = 3.2, vjust = -0.6,
+                fill = NA, label.color = NA, label.padding = unit(0, "pt"),
+                hjust = 0.5) +
+  
+  geom_hline(yintercept = 0, color = "gray40", linetype = "dashed", linewidth = 1.5) +
+  
+  geom_vline(xintercept = 2.5, color = "black", linewidth = 0.8, linetype = "solid") +
+  
+  scale_shape_manual(values = c("Significant" = 16, "Non-significant" = 21),
+                     guide = "none") +
+  
+  scale_x_discrete(labels = c("ARG", "ABG", "ARG", "ABG")) +
+  
+  scale_y_continuous(expand = expansion(mult = c(0.12, 0.18))) +
+  
+  labs(y = "Effect size of nitrogen addition (log response ratio)",
+       x = "",
+       title = " ") +
+  
+  theme_few() +
+  theme(
+    axis.text.y = element_text(size = 12, color = "black", face = "bold"),
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5,
+                               size = 12, color = "black", face = "bold"),
+    legend.position = "none",
+    axis.title.y = element_text(size = 14, face = "bold"),
+    strip.text = element_text(size = 12, face = "bold"),
+    panel.border = element_rect(fill = NA, color = "black", linewidth = 1.5),
+    panel.spacing.x = unit(0.6, "cm"),
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10)
+  )
+
+p
+
+ggsave("~/Desktop/codes/figures/Fig3o.pdf", plot = p, width = 18, height = 5, dpi = 300,
+       device = cairo_pdf)
+```
+
