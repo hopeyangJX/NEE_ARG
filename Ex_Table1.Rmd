@@ -1,0 +1,662 @@
+---
+title: "Ex_Table1"
+output: html_document
+date: "2026-10-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars,fig.width=20,fig.height=11}
+library(vegan)
+library(dplyr)
+library(ggplot2)
+library(tibble)
+library(patchwork)
+library(readxl)
+
+setwd("~/Desktop/codes")
+rm(list = ls())
+
+# ==========================================================
+# Excel file path (containing metal + group sheets)
+# ==========================================================
+excel_file <- "~/Desktop/codes/data/Ex_Table1_data.xlsx"
+
+# ==========================================================
+# Helper function: build one dbRDA plot for metal data
+# Distance: Euclidean
+# Transformation: standardize (for metal concentrations)
+# If data are metal resistance gene abundances, use "hellinger"
+# ==========================================================
+make_metal_plot <- function(excel_file, sheet_data, sheet_group,
+                            title_text, col11) {
+  
+  # ---- Read data from Excel sheets ----
+  data0 <- read_excel(excel_file, sheet = sheet_data) %>% as.data.frame()
+  rownames(data0) <- data0[[1]]
+  data0 <- data0[, -1]
+  data0[] <- lapply(data0, function(x) as.numeric(as.character(x)))
+  data0[is.na(data0)] <- 0
+  
+  env0 <- read_excel(excel_file, sheet = sheet_group) %>% as.data.frame()
+  rownames(env0) <- env0[[1]]
+  env0 <- env0[, -1]
+  
+  da.rar <- t(data0)
+  da.rar <- as.data.frame(da.rar)
+  env <- env0
+  env0$Nitrogen <- as.factor(env0$Nitrogen)
+  
+  # ---- Distance matrix: Euclidean ----
+  # For metal concentrations: standardize first
+  # If analyzing gene abundances instead, change "standardize" to "hellinger"
+  dist_mat <- vegdist(decostand(da.rar, "standardize"), "euclidean")
+  
+  # ---- dbRDA model ----
+  dbrda_result <- dbrda(
+    dist_mat ~ Nhistory * Nlevel,
+    data = env
+  )
+  
+  scores_df <- as.data.frame(scores(dbrda_result, display = "sites"))
+  scores_df <- scores_df[, 1:2]
+  colnames(scores_df) <- c("dbRDA1", "dbRDA2")
+  envpc <- cbind(env, scores_df)
+  
+  # ---- Explained variation ----
+  eig <- dbrda_result$CCA$eig
+  eig <- eig[!is.na(eig)]
+  total_var <- dbrda_result$tot.chi
+  dbRDA1 <- ifelse(length(eig) >= 1, round(eig[1] / total_var * 100, 1), 0)
+  dbRDA2 <- ifelse(length(eig) >= 2, round(eig[2] / total_var * 100, 1), 0)
+  cat("\n[", title_text, "] dbRDA1:", dbRDA1, "%  dbRDA2:", dbRDA2, "%\n")
+  
+  # ---- PERMANOVA: use the same Euclidean distance matrix ----
+  set.seed(315)
+  perma <- adonis2(
+    dist_mat ~ Nhistory * Nlevel,
+    data = env,
+    permutations = 9999,
+    by = "terms"
+  )
+  cat("===== PERMANOVA results (", title_text, ") =====\n")
+  print(perma)
+  
+  get_perma_idx <- function(idx) {
+    r2   <- perma[idx, "R2"]
+    pval <- perma[idx, "Pr(>F)"]
+    list(r2 = round(r2, 3), p = pval)
+  }
+  res_Nhistory <- get_perma_idx(1)
+  res_Nlevel   <- get_perma_idx(2)
+  res_interact <- get_perma_idx(3)
+  
+  # parse expression: "~" = space; avoid ordinary commas
+  format_p <- function(p) {
+    if (is.na(p))  return("p == NA")
+    if (p < 0.001) return("p < 0.001")
+    sprintf("p == %.3f", p)
+  }
+  
+  # ---- Factor levels ----
+  envpc$Nhistory <- factor(envpc$Nhistory, levels = c("Ncont", "Ncess"))
+  envpc$Nitrogen <- factor(envpc$Nitrogen,
+                           levels = c("0","2","5","10","15","20","50"),
+                           ordered = TRUE)
+  
+  lines <- c("Ncont" = "dotted", "Ncess" = "solid")
+  shap  <- c("Ncont" = 19,       "Ncess" = 17)
+  
+  # ---- Plot ----
+  p <- ggplot(data = envpc,
+              aes(x = dbRDA1, y = dbRDA2,
+                  colour = as.factor(Nlevel),
+                  linetype = Nhistory,
+                  shape = Nhistory)) +
+    geom_point(aes(colour = as.factor(Nlevel), shape = Nhistory),
+               alpha = 0.8, size = 10) +
+    stat_ellipse(aes(colour = as.factor(Nlevel)), level = 0.5, show.legend = TRUE) +
+    scale_colour_manual(values = col11) +
+    scale_linetype_manual(values = lines,
+                          labels = c(expression(N[cont]), expression(N[cess]))) +
+    scale_shape_manual(values = shap,
+                       labels = c(expression(N[cont]), expression(N[cess]))) +
+    labs(x = sprintf("dbRDA1 (%.1f%%)", dbRDA1),
+         y = sprintf("dbRDA2 (%.1f%%)", dbRDA2)) +
+    theme_bw() +
+    guides(colour   = guide_legend(title = expression(N[level])),
+           shape    = guide_legend(title = expression(N[history])),
+           linetype = guide_legend(title = expression(N[history]))) +
+    theme(text = element_text(size = 16, family = "sans", face = "bold"),
+          legend.title = element_text(colour = "black", size = 12, face = "bold"),
+          legend.text  = element_text(colour = "black", size = 12, face = "bold"),
+          axis.text    = element_text(size = 12, face = "bold"),
+          axis.title   = element_text(size = 13, face = "bold"),
+          panel.border = element_rect(fill = NA, color = "black",
+                                      size = 1.5, linetype = "solid")) +
+    # Top title
+    annotate("text",
+             x = mean(range(envpc$dbRDA1, na.rm = TRUE)),
+             y = max(envpc$dbRDA2, na.rm = TRUE) * 1.1,
+             label = title_text,
+             hjust = 0.5, vjust = 0, size = 5,
+             fontface = "bold", color = "black") +
+    # Three-line PERMANOVA annotations
+    annotate("text",
+             x = max(envpc$dbRDA1, na.rm = TRUE) * 0.96,
+             y = max(envpc$dbRDA2, na.rm = TRUE) * 0.96,
+             label = paste0("N[history]: R^2==", res_Nhistory$r2, "~",
+                            format_p(res_Nhistory$p)),
+             parse = TRUE, hjust = 1, size = 3.2) +
+    annotate("text",
+             x = max(envpc$dbRDA1, na.rm = TRUE) * 0.96,
+             y = max(envpc$dbRDA2, na.rm = TRUE) * 0.87,
+             label = paste0("N[level]: R^2==", res_Nlevel$r2, "~",
+                            format_p(res_Nlevel$p)),
+             parse = TRUE, hjust = 1, size = 3.2) +
+    annotate("text",
+             x = max(envpc$dbRDA1, na.rm = TRUE) * 0.96,
+             y = max(envpc$dbRDA2, na.rm = TRUE) * 0.78,
+             label = paste0("N[history] %*% N[level]: R^2==", res_interact$r2,
+                            "~", format_p(res_interact$p)),
+             parse = TRUE, hjust = 1, size = 3.2)
+  
+  p
+}
+
+# ==========================================================
+# Build the six metal dbRDA plots
+# ==========================================================
+p_N02 <- make_metal_plot(
+  excel_file  = excel_file,
+  sheet_data  = "N02metal",
+  sheet_group = "N02group",
+  title_text  = "N2-Metal resistance genes",
+  col11 = c("darkgrey","chartreuse","deepskyblue","darkviolet",
+            "darkorange","#CC0033","darkgoldenrod")
+)
+
+p_N05 <- make_metal_plot(
+  excel_file  = excel_file,
+  sheet_data  = "N05metal",
+  sheet_group = "N05group",
+  title_text  = "N5-Metal resistance genes",
+  col11 = c("darkgrey","deepskyblue","darkviolet",
+            "darkorange","#CC0033","darkgoldenrod")
+)
+
+p_N10 <- make_metal_plot(
+  excel_file  = excel_file,
+  sheet_data  = "N10metal",
+  sheet_group = "N10group",
+  title_text  = "N10-Metal resistance genes",
+  col11 = c("darkgrey","darkviolet","darkorange","#CC0033","darkgoldenrod")
+)
+
+p_N15 <- make_metal_plot(
+  excel_file  = excel_file,
+  sheet_data  = "N15metal",
+  sheet_group = "N15group",
+  title_text  = "N15-Metal resistance genes",
+  col11 = c("darkgrey","darkorange","#CC0033","darkgoldenrod")
+)
+
+p_N20 <- make_metal_plot(
+  excel_file  = excel_file,
+  sheet_data  = "N20metal",
+  sheet_group = "N20group",
+  title_text  = "N20-Metal resistance genes",
+  col11 = c("darkgrey","#CC0033","darkgoldenrod")
+)
+
+p_N50 <- make_metal_plot(
+  excel_file  = excel_file,
+  sheet_data  = "N50metal",
+  sheet_group = "N50group",
+  title_text  = "N50-Metal resistance genes",
+  col11 = c("darkgrey","darkgoldenrod")
+)
+
+# ==========================================================
+# Combine the six plots into one figure and export
+# ==========================================================
+p_combined <- p_N02 + p_N05 + p_N10 +
+  p_N15 + p_N20 + p_N50 +
+  plot_layout(ncol = 3) +
+  plot_annotation(tag_levels = "a")
+
+print(p_combined)
+
+ggsave("~/Desktop/codes/figures/Ex_Table1_Metal_euclidean.pdf",
+       p_combined, width = 20, height = 11, dpi = 600)
+
+########################################
+library(vegan)
+library(dplyr)
+library(ggplot2)
+library(tibble)
+library(patchwork)
+library(readxl)
+
+setwd("~/Desktop/codes")
+rm(list = ls())
+
+# ==========================================================
+# Excel file path (contains MRG + group sheets)
+# ==========================================================
+excel_file <- "~/Desktop/codes/data/Ex_Table1_data.xlsx"
+
+# ==========================================================
+# Helper function: build one dbRDA plot for MRG
+# ==========================================================
+make_mrg_plot <- function(excel_file, sheet_data, sheet_group,
+                          title_text, col11) {
+  
+  # ---- Read data from Excel sheets ----
+  data0 <- read_excel(excel_file, sheet = sheet_data) %>% as.data.frame()
+  rownames(data0) <- data0[[1]]
+  data0 <- data0[, -1]
+  data0[] <- lapply(data0, function(x) as.numeric(as.character(x)))
+  data0[is.na(data0)] <- 0
+  
+  env0 <- read_excel(excel_file, sheet = sheet_group) %>% as.data.frame()
+  rownames(env0) <- env0[[1]]
+  env0 <- env0[, -1]
+  
+  da.rar <- t(data0)
+  da.rar <- as.data.frame(da.rar)
+  env <- env0
+  env0$Nitrogen <- as.factor(env0$Nitrogen)
+  
+  # ---- dbRDA model ----
+  dbrda_result <- dbrda(
+    vegdist(decostand(da.rar, "hellinger"), "bray") ~ Nhistory * Nlevel,
+    data = env
+  )
+  
+  scores_df <- as.data.frame(scores(dbrda_result, display = "sites"))
+  scores_df <- scores_df[, 1:2]
+  colnames(scores_df) <- c("dbRDA1", "dbRDA2")
+  envpc <- cbind(env, scores_df)
+  
+  # ---- Explained variation ----
+  eig <- dbrda_result$CCA$eig
+  eig <- eig[!is.na(eig)]
+  total_var <- dbrda_result$tot.chi
+  dbRDA1 <- ifelse(length(eig) >= 1, round(eig[1] / total_var * 100, 1), 0)
+  dbRDA2 <- ifelse(length(eig) >= 2, round(eig[2] / total_var * 100, 1), 0)
+  cat("\n[", title_text, "] dbRDA1:", dbRDA1, "%  dbRDA2:", dbRDA2, "%\n")
+  
+  # ---- PERMANOVA ----
+  set.seed(315)
+  bray_dis <- vegdist(decostand(da.rar, "hellinger"), "bray")
+  perma <- adonis2(bray_dis ~ Nhistory * Nlevel,
+                   data = env, permutations = 9999, by = "terms")
+  cat("===== PERMANOVA results (", title_text, ") =====\n")
+  print(perma)
+  
+  get_perma_idx <- function(idx) {
+    r2   <- perma[idx, "R2"]
+    pval <- perma[idx, "Pr(>F)"]
+    list(r2 = round(r2, 3), p = pval)
+  }
+  res_Nhistory <- get_perma_idx(1)
+  res_Nlevel   <- get_perma_idx(2)
+  res_interact <- get_perma_idx(3)
+  
+  # parse expression: "~" = space; avoid ordinary commas
+  format_p <- function(p) {
+    if (is.na(p))  return("p == NA")
+    if (p < 0.001) return("p < 0.001")
+    sprintf("p == %.3f", p)
+  }
+  
+  # ---- Factor levels ----
+  envpc$Nhistory <- factor(envpc$Nhistory, levels = c("Ncont", "Ncess"))
+  envpc$Nitrogen <- factor(envpc$Nitrogen,
+                           levels = c("0","2","5","10","15","20","50"),
+                           ordered = TRUE)
+  
+  lines <- c("Ncont" = "dotted", "Ncess" = "solid")
+  shap  <- c("Ncont" = 19,       "Ncess" = 17)
+  
+  # ---- Plot ----
+  p <- ggplot(data = envpc,
+              aes(x = dbRDA1, y = dbRDA2,
+                  colour = as.factor(Nlevel),
+                  linetype = Nhistory,
+                  shape = Nhistory)) +
+    geom_point(aes(colour = as.factor(Nlevel), shape = Nhistory),
+               alpha = 0.8, size = 10) +
+    stat_ellipse(aes(colour = as.factor(Nlevel)), level = 0.5, show.legend = TRUE) +
+    scale_colour_manual(values = col11) +
+    scale_linetype_manual(values = lines,
+                          labels = c(expression(N[cont]), expression(N[cess]))) +
+    scale_shape_manual(values = shap,
+                       labels = c(expression(N[cont]), expression(N[cess]))) +
+    labs(x = sprintf("dbRDA1 (%.1f%%)", dbRDA1),
+         y = sprintf("dbRDA2 (%.1f%%)", dbRDA2)) +
+    theme_bw() +
+    guides(colour   = guide_legend(title = expression(N[level])),
+           shape    = guide_legend(title = expression(N[history])),
+           linetype = guide_legend(title = expression(N[history]))) +
+    theme(text = element_text(size = 16, family = "sans", face = "bold"),
+          legend.title = element_text(colour = "black", size = 12, face = "bold"),
+          legend.text  = element_text(colour = "black", size = 12, face = "bold"),
+          axis.text    = element_text(size = 12, face = "bold"),
+          axis.title   = element_text(size = 13, face = "bold"),
+          panel.border = element_rect(fill = NA, color = "black",
+                                      size = 1.5, linetype = "solid")) +
+    # Top title
+    annotate("text",
+             x = mean(range(envpc$dbRDA1, na.rm = TRUE)),
+             y = max(envpc$dbRDA2, na.rm = TRUE) * 1.1,
+             label = title_text,
+             hjust = 0.5, vjust = 0, size = 5,
+             fontface = "bold", color = "black") +
+    # Three-line PERMANOVA annotations
+    annotate("text",
+             x = max(envpc$dbRDA1, na.rm = TRUE) * 0.96,
+             y = max(envpc$dbRDA2, na.rm = TRUE) * 0.96,
+             label = paste0("N[history]: R^2==", res_Nhistory$r2, "~",
+                            format_p(res_Nhistory$p)),
+             parse = TRUE, hjust = 1, size = 3.2) +
+    annotate("text",
+             x = max(envpc$dbRDA1, na.rm = TRUE) * 0.96,
+             y = max(envpc$dbRDA2, na.rm = TRUE) * 0.87,
+             label = paste0("N[level]: R^2==", res_Nlevel$r2, "~",
+                            format_p(res_Nlevel$p)),
+             parse = TRUE, hjust = 1, size = 3.2) +
+    annotate("text",
+             x = max(envpc$dbRDA1, na.rm = TRUE) * 0.96,
+             y = max(envpc$dbRDA2, na.rm = TRUE) * 0.78,
+             label = paste0("N[history] %*% N[level]: R^2==", res_interact$r2,
+                            "~", format_p(res_interact$p)),
+             parse = TRUE, hjust = 1, size = 3.2)
+  
+  p
+}
+
+# ==========================================================
+# Build the six MRG dbRDA plots (one per nitrogen level)
+# ==========================================================
+p_N02 <- make_mrg_plot(
+  excel_file  = excel_file,
+  sheet_data  = "N02MRG",
+  sheet_group = "N02group",
+  title_text  = "N2-Metal resistance genes",
+  col11 = c("darkgrey","chartreuse","deepskyblue","darkviolet",
+            "darkorange","#CC0033","darkgoldenrod")
+)
+
+p_N05 <- make_mrg_plot(
+  excel_file  = excel_file,
+  sheet_data  = "N05MRG",
+  sheet_group = "N05group",
+  title_text  = "N5-Metal resistance genes",
+  col11 = c("darkgrey","deepskyblue","darkviolet",
+            "darkorange","#CC0033","darkgoldenrod")
+)
+
+p_N10 <- make_mrg_plot(
+  excel_file  = excel_file,
+  sheet_data  = "N10MRG",
+  sheet_group = "N10group",
+  title_text  = "N10-Metal resistance genes",
+  col11 = c("darkgrey","darkviolet","darkorange","#CC0033","darkgoldenrod")
+)
+
+p_N15 <- make_mrg_plot(
+  excel_file  = excel_file,
+  sheet_data  = "N15MRG",
+  sheet_group = "N15group",
+  title_text  = "N15-Metal resistance genes",
+  col11 = c("darkgrey","darkorange","#CC0033","darkgoldenrod")
+)
+
+p_N20 <- make_mrg_plot(
+  excel_file  = excel_file,
+  sheet_data  = "N20MRG",
+  sheet_group = "N20group",
+  title_text  = "N20-Metal resistance genes",
+  col11 = c("darkgrey","#CC0033","darkgoldenrod")
+)
+
+p_N50 <- make_mrg_plot(
+  excel_file  = excel_file,
+  sheet_data  = "N50MRG",
+  sheet_group = "N50group",
+  title_text  = "N50-Metal resistance genes",
+  col11 = c("darkgrey","darkgoldenrod")
+)
+
+# ==========================================================
+# Combine the six plots into one figure and export
+# ==========================================================
+p_combined <- p_N02 + p_N05 + p_N10 +
+  p_N15 + p_N20 + p_N50 +
+  plot_layout(ncol = 3) +
+  plot_annotation(tag_levels = "a")
+print(p_combined)
+ggsave("~/Desktop/codes/figures/Ex_Table1_MRG.pdf",
+       p_combined, width = 20, height = 11, dpi = 600)
+##################################################################
+library(vegan)
+library(dplyr)
+library(ggplot2)
+library(tibble)
+library(patchwork)
+library(readxl)
+
+setwd("~/Desktop/codes")
+rm(list = ls())
+
+# ==========================================================
+# Excel file path (contains ARG + group sheets)
+# ==========================================================
+excel_file <- "~/Desktop/codes/data/Ex_Table1_data.xlsx"
+
+# ==========================================================
+# Helper function: build one dbRDA plot for ARG
+# ==========================================================
+make_arg_plot <- function(excel_file, sheet_data, sheet_group,
+                          title_text, col11) {
+  
+  # ---- Read data from Excel sheets ----
+  data0 <- read_excel(excel_file, sheet = sheet_data) %>% as.data.frame()
+  rownames(data0) <- data0[[1]]
+  data0 <- data0[, -1]
+  data0[] <- lapply(data0, function(x) as.numeric(as.character(x)))
+  data0[is.na(data0)] <- 0
+  
+  env0 <- read_excel(excel_file, sheet = sheet_group) %>% as.data.frame()
+  rownames(env0) <- env0[[1]]
+  env0 <- env0[, -1]
+  
+  da.rar <- t(data0)
+  da.rar <- as.data.frame(da.rar)
+  env <- env0
+  env0$Nitrogen <- as.factor(env0$Nitrogen)
+  
+  # ---- dbRDA model ----
+  dbrda_result <- dbrda(
+    vegdist(decostand(da.rar, "hellinger"), "bray") ~ Nhistory * Nlevel,
+    data = env
+  )
+  
+  scores_df <- as.data.frame(scores(dbrda_result, display = "sites"))
+  scores_df <- scores_df[, 1:2]
+  colnames(scores_df) <- c("dbRDA1", "dbRDA2")
+  envpc <- cbind(env, scores_df)
+  
+  # ---- Explained variation ----
+  eig <- dbrda_result$CCA$eig
+  eig <- eig[!is.na(eig)]
+  total_var <- dbrda_result$tot.chi
+  dbRDA1 <- ifelse(length(eig) >= 1, round(eig[1] / total_var * 100, 1), 0)
+  dbRDA2 <- ifelse(length(eig) >= 2, round(eig[2] / total_var * 100, 1), 0)
+  cat("\n[", title_text, "] dbRDA1:", dbRDA1, "%  dbRDA2:", dbRDA2, "%\n")
+  
+  # ---- PERMANOVA ----
+  set.seed(315)
+  bray_dis <- vegdist(decostand(da.rar, "hellinger"), "bray")
+  perma <- adonis2(bray_dis ~ Nhistory * Nlevel,
+                   data = env, permutations = 9999, by = "terms")
+  cat("===== PERMANOVA results (", title_text, ") =====\n")
+  print(perma)
+  
+  get_perma_idx <- function(idx) {
+    r2   <- perma[idx, "R2"]
+    pval <- perma[idx, "Pr(>F)"]
+    list(r2 = round(r2, 3), p = pval)
+  }
+  res_Nhistory <- get_perma_idx(1)
+  res_Nlevel   <- get_perma_idx(2)
+  res_interact <- get_perma_idx(3)
+  
+  # parse expression: "~" = space; avoid ordinary commas
+  format_p <- function(p) {
+    if (is.na(p))  return("p == NA")
+    if (p < 0.001) return("p < 0.001")
+    sprintf("p == %.3f", p)
+  }
+  
+  # ---- Factor levels ----
+  envpc$Nhistory <- factor(envpc$Nhistory, levels = c("Ncont", "Ncess"))
+  envpc$Nitrogen <- factor(envpc$Nitrogen,
+                           levels = c("0","2","5","10","15","20","50"),
+                           ordered = TRUE)
+  
+  lines <- c("Ncont" = "dotted", "Ncess" = "solid")
+  shap  <- c("Ncont" = 19,       "Ncess" = 17)
+  
+  # ---- Plot ----
+  p <- ggplot(data = envpc,
+              aes(x = dbRDA1, y = dbRDA2,
+                  colour = as.factor(Nlevel),
+                  linetype = Nhistory,
+                  shape = Nhistory)) +
+    geom_point(aes(colour = as.factor(Nlevel), shape = Nhistory),
+               alpha = 0.8, size = 10) +
+    stat_ellipse(aes(colour = as.factor(Nlevel)), level = 0.5, show.legend = TRUE) +
+    scale_colour_manual(values = col11) +
+    scale_linetype_manual(values = lines,
+                          labels = c(expression(N[cont]), expression(N[cess]))) +
+    scale_shape_manual(values = shap,
+                       labels = c(expression(N[cont]), expression(N[cess]))) +
+    labs(x = sprintf("dbRDA1 (%.1f%%)", dbRDA1),
+         y = sprintf("dbRDA2 (%.1f%%)", dbRDA2)) +
+    theme_bw() +
+    guides(colour   = guide_legend(title = expression(N[level])),
+           shape    = guide_legend(title = expression(N[history])),
+           linetype = guide_legend(title = expression(N[history]))) +
+    theme(text = element_text(size = 16, family = "sans", face = "bold"),
+          legend.title = element_text(colour = "black", size = 12, face = "bold"),
+          legend.text  = element_text(colour = "black", size = 12, face = "bold"),
+          axis.text    = element_text(size = 12, face = "bold"),
+          axis.title   = element_text(size = 13, face = "bold"),
+          panel.border = element_rect(fill = NA, color = "black",
+                                      size = 1.5, linetype = "solid")) +
+    # Top title
+    annotate("text",
+             x = mean(range(envpc$dbRDA1, na.rm = TRUE)),
+             y = max(envpc$dbRDA2, na.rm = TRUE) * 1.1,
+             label = title_text,
+             hjust = 0.5, vjust = 0, size = 5,
+             fontface = "bold", color = "black") +
+    # Three-line PERMANOVA annotations
+    annotate("text",
+             x = max(envpc$dbRDA1, na.rm = TRUE) * 0.96,
+             y = max(envpc$dbRDA2, na.rm = TRUE) * 0.96,
+             label = paste0("N[history]: R^2==", res_Nhistory$r2, "~",
+                            format_p(res_Nhistory$p)),
+             parse = TRUE, hjust = 1, size = 3.2) +
+    annotate("text",
+             x = max(envpc$dbRDA1, na.rm = TRUE) * 0.96,
+             y = max(envpc$dbRDA2, na.rm = TRUE) * 0.87,
+             label = paste0("N[level]: R^2==", res_Nlevel$r2, "~",
+                            format_p(res_Nlevel$p)),
+             parse = TRUE, hjust = 1, size = 3.2) +
+    annotate("text",
+             x = max(envpc$dbRDA1, na.rm = TRUE) * 0.96,
+             y = max(envpc$dbRDA2, na.rm = TRUE) * 0.78,
+             label = paste0("N[history] %*% N[level]: R^2==", res_interact$r2,
+                            "~", format_p(res_interact$p)),
+             parse = TRUE, hjust = 1, size = 3.2)
+  
+  p
+}
+
+# ==========================================================
+# Build the six ARG dbRDA plots (one per nitrogen level)
+# ==========================================================
+p_N02 <- make_arg_plot(
+  excel_file  = excel_file,
+  sheet_data  = "N02ARG",
+  sheet_group = "N02group",
+  title_text  = "N2-Antibiotic resistance genes",
+  col11 = c("darkgrey","chartreuse","deepskyblue","darkviolet",
+            "darkorange","#CC0033","darkgoldenrod")
+)
+
+p_N05 <- make_arg_plot(
+  excel_file  = excel_file,
+  sheet_data  = "N05ARG",
+  sheet_group = "N05group",
+  title_text  = "N5-Antibiotic resistance genes",
+  col11 = c("darkgrey","deepskyblue","darkviolet",
+            "darkorange","#CC0033","darkgoldenrod")
+)
+
+p_N10 <- make_arg_plot(
+  excel_file  = excel_file,
+  sheet_data  = "N10ARG",
+  sheet_group = "N10group",
+  title_text  = "N10-Antibiotic resistance genes",
+  col11 = c("darkgrey","darkviolet","darkorange","#CC0033","darkgoldenrod")
+)
+
+p_N15 <- make_arg_plot(
+  excel_file  = excel_file,
+  sheet_data  = "N15ARG",
+  sheet_group = "N15group",
+  title_text  = "N15-Antibiotic resistance genes",
+  col11 = c("darkgrey","darkorange","#CC0033","darkgoldenrod")
+)
+
+p_N20 <- make_arg_plot(
+  excel_file  = excel_file,
+  sheet_data  = "N20ARG",
+  sheet_group = "N20group",
+  title_text  = "N20-Antibiotic resistance genes",
+  col11 = c("darkgrey","#CC0033","darkgoldenrod")
+)
+
+p_N50 <- make_arg_plot(
+  excel_file  = excel_file,
+  sheet_data  = "N50ARG",
+  sheet_group = "N50group",
+  title_text  = "N50-Antibiotic resistance genes",
+  col11 = c("darkgrey","darkgoldenrod")
+)
+
+# ==========================================================
+# Combine the six plots into one figure and export
+# ==========================================================
+p_combined <- p_N02 + p_N05 + p_N10 +
+  p_N15 + p_N20 + p_N50 +
+  plot_layout(ncol = 3) +
+  plot_annotation(tag_levels = "a")
+print(p_combined)
+ggsave("~/Desktop/codes/figures/Ex_Table1_ARG.pdf",
+       p_combined, width = 20, height = 11, dpi = 600)
+```
+

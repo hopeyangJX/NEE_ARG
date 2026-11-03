@@ -1,0 +1,799 @@
+---
+title: "Ex_Fig3"
+output: html_document
+date: "2026-10-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars,fig.width=13,fig.height=6.5}
+rm(list=ls())
+library(ggplot2)
+library(readxl)
+library(patchwork)   # Horizontal combine + merge legends
+setwd("~/Desktop/codes")
+da <- read_excel("~/Desktop/codes/data/Ex_Fig3_data.xlsx", sheet = "exp1b")
+da$Nlevel <- as.numeric(da$Nlevel)
+
+# ======================
+# Split by N history
+# ======================
+data1 <- da[da$Nhistory == "Ncont", ]
+data2 <- da[da$Nhistory == "Ncess", ]
+
+# ======================
+# Shared mappings
+# ======================
+da$Nregime  <- factor(da$Nhistory, levels = c("Ncont", "Ncess"))
+da$Nhistory <- factor(da$Nhistory, levels = c("Ncont", "Ncess"))
+
+color_history <- c("Ncont" = "darkred", "Ncess" = "darkblue")
+lines <- c("Ncont" = "solid",   "Ncess" = "solid")
+
+# ======================
+# Helper: build a two-line label (rho and p) as plotmath strings
+# ======================
+make_lab <- function(ct) {
+  rho <- round(unname(ct$estimate), 3)
+  p   <- ct$p.value
+  p_str <- if (p < 0.001) sprintf("%.1e", p) else sprintf("%.3f", p)
+  list(
+    rho = sprintf("atop(italic(rho)==%.3f)", rho),
+    p   = sprintf("atop(italic(p)==\"%s\")", p_str)
+  )
+}
+
+# ==================================================================
+# Plot A: ROS vs Nlevel
+# ==================================================================
+ct_a_cont <- cor.test(data1$Nlevel, data1$ROS, method = "spearman")
+ct_a_cess <- cor.test(data2$Nlevel, data2$ROS, method = "spearman")
+lab_a_cont <- make_lab(ct_a_cont)
+lab_a_cess <- make_lab(ct_a_cess)
+
+p_a <- ggplot(data = da,
+              aes(x = Nlevel, y = ROS, colour = Nhistory)) + 
+  geom_point(alpha = 0.5, size = 8) +
+  geom_smooth(
+    aes(group = Nhistory, linetype = Nhistory), 
+    method = 'lm',
+    formula = y ~ poly(x, 1, raw = TRUE),
+    level = 0.95, se = TRUE, size = 2, alpha = 0.5,
+    show.legend = FALSE
+  ) +
+  scale_colour_manual(
+    values = color_history,
+    labels = c(expression(N[cont]), expression(N[cess]))
+  ) +
+  scale_linetype_manual(values = lines) +
+  theme_bw() +
+  guides(
+    colour   = guide_legend(
+      title = expression(N[history]),
+      override.aes = list(shape = 16, linetype = 0, size = 6, alpha = 1, fill = NA)
+    ),
+    # 强制隐藏所有的额外图例
+    linetype = "none",
+    shape    = "none",
+    fill     = "none"
+  ) +
+  annotate("text", x = 35, y = 2000, parse = TRUE,
+           label = lab_a_cont$rho, size = 8, face = "bold", colour = "darkred") +
+  annotate("text", x = 35, y = 1900, parse = TRUE,
+           label = lab_a_cont$p,   size = 8, face = "bold", colour = "darkred") +
+  annotate("text", x = 35, y = 1400, parse = TRUE,
+           label = lab_a_cess$rho, size = 8, face = "bold", colour = "darkblue") +
+  annotate("text", x = 35, y = 1300, parse = TRUE,
+           label = lab_a_cess$p,   size = 8, face = "bold", colour = "darkblue") +
+  theme(
+    text = element_text(size = 12, family = "sans", colour = "black", face = "bold"),
+    axis.text  = element_text(colour = "black", size = 10, face = "bold"),
+    axis.title = element_text(colour = "black", size = 16, face = "bold"),
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text  = element_text(size = 11, face = "bold"),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background  = element_rect(fill = "white", color = NA),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border     = element_rect(fill = NA, color = "black", size = 1.5, linetype = "solid"),
+    legend.key       = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(fill = "transparent", color = NA)
+  ) +
+  xlab(expression(bold(N~addition~levels~(g~N~m^-2~yr^-1)))) +
+  ylab(expression(bold("Relative abundance of ROS-related genes ("*"\u00d7"*"/Gb)")))
+
+# ==================================================================
+# Plot B: ARG vs ROS
+# ==================================================================
+ct_b_cont <- cor.test(data1$ROS, data1$ARG, method = "spearman")
+ct_b_cess <- cor.test(data2$ROS, data2$ARG, method = "spearman")
+lab_b_cont <- make_lab(ct_b_cont)
+lab_b_cess <- make_lab(ct_b_cess)
+
+p_b <- ggplot(data = da,
+              aes(x = ROS, y = ARG, colour = Nhistory)) + 
+  geom_point(alpha = 0.5, size = 8) +
+  geom_smooth(
+    aes(group = Nhistory, linetype = Nhistory), 
+    method = 'lm',
+    formula = y ~ poly(x, 1, raw = TRUE),
+    level = 0.95, se = TRUE, size = 2, alpha = 0.5,
+    show.legend = FALSE
+  ) +
+  scale_colour_manual(
+    values = color_history,
+    labels = c(expression(N[cont]), expression(N[cess]))
+  ) +
+  scale_linetype_manual(values = lines) +
+  theme_bw() +
+  guides(
+    colour   = guide_legend(
+      title = expression(N[history]),
+      override.aes = list(shape = 16, linetype = 0, size = 6, alpha = 1, fill = NA)
+    ),
+    # 强制隐藏所有的额外图例
+    linetype = "none",
+    shape    = "none",
+    fill     = "none"
+  ) +
+  annotate("text", x = 1300, y = 500, parse = TRUE,
+           label = lab_b_cont$rho, size = 8, face = "bold", colour = "darkred") +
+  annotate("text", x = 1300, y = 440, parse = TRUE,
+           label = lab_b_cont$p,   size = 8, face = "bold", colour = "darkred") +
+  annotate("text", x = 1500, y = 100, parse = TRUE,
+           label = lab_b_cess$rho, size = 8, face = "bold", colour = "darkblue") +
+  annotate("text", x = 1500, y = 40,  parse = TRUE,
+           label = lab_b_cess$p,   size = 8, face = "bold", colour = "darkblue") +
+  theme(
+    text = element_text(size = 12, family = "sans", colour = "black", face = "bold"),
+    axis.text    = element_text(colour = "black", size = 10, face = "bold"),
+    axis.title   = element_text(colour = "black", size = 16, face = "bold"),
+    legend.title = element_text(size = 16, face = "bold"),
+    legend.text  = element_text(size = 16, face = "bold"),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background  = element_rect(fill = "white", color = NA),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border     = element_rect(fill = NA, color = "black", size = 1.5, linetype = "solid"),
+    legend.key       = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(fill = "transparent", color = NA)
+  ) +
+  xlab(expression(bold("Relative abundance of ROS-related genes ("*"\u00d7"*"/Gb)"))) +
+  ylab("Relative abundance of ARGs (\u00d7/Gb)")
+
+# ==================================================================
+# Horizontal combine
+# ==================================================================
+combined <- (p_a | p_b) +
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = list(c("a", "b"))) &
+  theme(
+    legend.position = "right",
+    legend.title    = element_text(size = 11, face = "bold"),
+    legend.text     = element_text(size = 11, face = "bold"),
+    plot.tag        = element_text(size = 24, face = "bold"),
+    legend.key       = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(fill = "transparent", color = NA)
+  )
+
+print(combined)
+ggsave("~/Desktop/codes/figures/Ex_Fig3ab.pdf",
+       plot = combined, width = 13, height = 6.5, dpi = 300)
+```
+
+
+```{r,fig.width=13,fig.height=6.5}
+rm(list = ls())
+
+# ======================
+# Load packages
+# ======================
+library(ggplot2)
+library(dplyr)
+library(ggsignif)
+library(readxl)
+library(patchwork)     # ← 横向合并
+
+setwd("~/Desktop/codes")
+
+# ==================================================================
+# Plot C: ROS  ~  treatment (Welch's t-test)
+# ==================================================================
+df_c <- read_excel("~/Desktop/codes/data/Ex_Fig3_data.xlsx", sheet = "exp2a")
+
+df_c$treatment <- factor(df_c$treatment, levels = c("Non-acidified", "Acidified"))
+df_c$treatment <- factor(df_c$treatment, labels = c("Control", "Acid added"))
+
+t_result <- t.test(ROS ~ treatment,
+                   data        = df_c,
+                   alternative = "two.sided",
+                   var.equal   = FALSE)
+p_val <- t_result$p.value
+t_val <- t_result$statistic
+
+fmt_p <- ifelse(p_val < 0.0001,
+                sprintf("%.2e", p_val),
+                sprintf("%.3f", p_val))
+
+# ===== 统计标签：t 与 p 均为 bold + italic；数值也 bold =====
+stat_label <- sprintf(
+  "bolditalic(t) == bold('%.2f') * ',' ~ bolditalic(p) == bold('%s')",
+  t_val, fmt_p
+)
+
+group_colors <- c("Control" = "#B07AA1", "Acid added" = "#6BAED6")
+
+y_max   <- max(df_c$ROS, na.rm = TRUE)
+y_range <- diff(range(df_c$ROS, na.rm = TRUE))
+y_pos   <- y_max + y_range * 0.15
+
+p_c <- ggplot(df_c, aes(x = treatment, y = ROS, fill = treatment)) +
+  geom_boxplot(width = 0.5, alpha = 0.5, linewidth = 0.5,
+               outlier.shape = NA) +
+  geom_jitter(aes(color = treatment),
+              position = position_jitter(width = 0.15),
+              size = 8, alpha = 0.5, show.legend = FALSE) +
+  scale_color_manual(values = group_colors) +
+  scale_fill_manual(values  = group_colors) +
+  geom_signif(
+    comparisons = list(c("Control", "Acid added")),
+    y_position  = y_pos,
+    annotations = stat_label,
+    parse       = TRUE,
+    textsize    = 6,
+    size        = 1.2,
+    tip_length  = 0.02,
+    vjust       = -0.6
+  ) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.28))) +
+  labs(x = NULL,
+       y = "Relative abundance of ROS-related genes (\u00D7/Gb)") +
+  theme_bw() +
+  theme(
+    text = element_text(size = 12, colour = "black", face = "bold"),
+    legend.position = "none",
+    axis.text.x  = element_text(colour = "black", size = 16, face = "bold"),
+    axis.text.y  = element_text(colour = "black", size = 10, face = "bold"),
+    axis.title.y = element_text(colour = "black", size = 16, face = "bold",
+                                angle = 90),
+    axis.title.x = element_text(colour = "black", size = 16, face = "bold"),
+    axis.ticks.y = element_line(color = "black", linewidth = 0.6),
+    axis.ticks.x = element_line(color = "black", linewidth = 0.6),
+    panel.grid   = element_blank(),
+    panel.border = element_rect(fill = NA, color = "black",
+                                linewidth = 1, linetype = "solid"),
+    plot.margin  = margin(t = 10, r = 10, b = 10, l = 10)
+  )
+
+# ==================================================================
+# Plot D: ARG ~ ROS (Spearman)
+# ==================================================================
+df_d <- read_excel("~/Desktop/codes/data/Ex_Fig3_data.xlsx", sheet = "exp2a")
+
+df_d$treatment <- factor(df_d$treatment, levels = c("Non-acidified", "Acidified"))
+df_d$treatment <- factor(df_d$treatment, labels = c("Control", "Acid added"))
+
+xvar <- "ROS"
+yvar <- "ARG"
+xlab_text <- "Relative abundance of ROS-related genes (\u00D7/Gb)"
+ylab_text <- "Relative abundance of ARGs (\u00D7/Gb)"
+
+cor_res <- cor.test(df_d[[xvar]], df_d[[yvar]], method = "spearman")
+rho_val <- round(unname(cor_res$estimate), 3)
+p_raw   <- cor_res$p.value
+
+fmt_p_d <- if (p_raw < 0.001) sprintf("%.1e", p_raw) else sprintf("%.3f", p_raw)
+
+# ===== 统计标签：rho 与 p 均为 bold + italic；数值也 bold =====
+cor_label <- sprintf(
+  "atop(bolditalic(rho) == bold(%.3f), bolditalic(p) == bold('%s'))",
+  rho_val, fmt_p_d
+)
+
+x_min <- min(df_d[[xvar]], na.rm = TRUE); x_max <- max(df_d[[xvar]], na.rm = TRUE)
+y_min <- min(df_d[[yvar]], na.rm = TRUE); y_max <- max(df_d[[yvar]], na.rm = TRUE)
+
+anno_x <- x_min + 0.05 * (x_max - x_min)
+anno_y <- y_max - 0.15 * (y_max - y_min)
+
+p_d <- ggplot(df_d, aes(x = .data[[xvar]], y = .data[[yvar]],
+                        colour = treatment)) +
+  geom_point(alpha = 0.5, size = 8) +
+  geom_smooth(
+    method = 'lm',
+    formula = y ~ poly(x, 1, raw = TRUE),
+    level = 0.95, se = TRUE, size = 2, alpha = 0.5,
+    color = "black", fill = "grey70"
+  ) +
+  scale_colour_manual(values = group_colors,
+                      labels = c("Control", "Acid added")) +
+  annotate("text", x = anno_x, y = anno_y,
+           label = cor_label, parse = TRUE,
+           size = 8, colour = "black", hjust = 0) +
+  labs(x = xlab_text, y = ylab_text, colour = "Treatment") +
+  theme_bw() +
+  theme(
+    text = element_text(size = 12, family = "sans", colour = "black", face = "bold"),
+    axis.text  = element_text(colour = "black", size = 12, face = "bold"),
+    axis.title = element_text(colour = "black", size = 16, face = "bold"),
+    legend.title = element_text(size = 16, face = "bold"),
+    legend.text  = element_text(size = 16, face = "bold"),
+    legend.position = "right",
+    panel.border = element_rect(fill = NA, color = "black",
+                                size = 1.5, linetype = "solid"),
+    panel.grid = element_blank()
+  )
+
+# ==================================================================
+# 横向合并：左 c，右 d
+# ==================================================================
+combined <- (p_c | p_d) +
+  plot_annotation(tag_levels = list(c("c", "d"))) &
+  theme(
+    plot.tag = element_text(size = 24, face = "bold")
+  )
+
+print(combined)
+
+ggsave("~/Desktop/codes/figures/Ex_Fig3cd.pdf",
+       combined, width = 13, height = 6.5, dpi = 600)
+```
+
+```{r,fig.width=13,fig.height=6.5}
+setwd("~/Desktop/codes")
+rm(list = ls())
+
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(agricolae)
+library(car)
+library(rstatix)
+library(dunn.test)
+library(patchwork)
+
+# ==================================================================
+# Plot E: ROS ~ treatment2 (two-way ANOVA + CLD)
+# ==================================================================
+da_e <- read_excel("~/Desktop/codes/data/Ex_Fig3_data.xlsx", sheet = "exp2b")
+da_e$treatment2 <- factor(da_e$treatment2,
+                          levels = c("N0-L0", "N20-L0", "N0-L45", "N20-L45"))
+
+da_e$N <- factor(sub("-.*", "", as.character(da_e$treatment2)), levels = c("N0", "N20"))
+da_e$L <- factor(sub(".*-", "", as.character(da_e$treatment2)), levels = c("L0", "L45"))
+
+yvar      <- "ROS"
+ylab_ros  <- "Relative abundance of ROS-related genes (\u00D7/Gb)"
+
+col11 <- c("#1A1C60","#E27D7C", "#B983DF","#8B5A2B")
+
+trt_labs <- c(
+  "N0-L0"   = "Control",
+  "N20-L0"  = "N",
+  "N0-L45"  = "L",
+  "N20-L45" = "N+L"
+)
+
+# ===== 双因素 ANOVA 文本：两行显示，N/L 在上，N×L 在下 =====
+anova_lab <- function(y, N, L) {
+  fit <- aov(y ~ N * L)
+  s   <- summary(fit)[[1]]
+  fmt <- function(x) ifelse(is.na(x), "NA",
+                            ifelse(x < 0.001,
+                                   format(x, scientific = TRUE, digits = 3),
+                                   sprintf("%.3f", x)))
+  f1 <- fmt(s[1, "F value"]); p1 <- fmt(s[1, "Pr(>F)"])
+  f2 <- fmt(s[2, "F value"]); p2 <- fmt(s[2, "Pr(>F)"])
+  f3 <- fmt(s[3, "F value"]); p3 <- fmt(s[3, "Pr(>F)"])
+  
+  sprintf(
+    paste0(
+      "atop(",
+      "bold(N)*':'~bolditalic(F)==bold(\"%s\")*','~bolditalic(p)==bold(\"%s\")*'   '*",
+      "bold(L)*':'~bolditalic(F)==bold(\"%s\")*','~bolditalic(p)==bold(\"%s\"), ",
+      "bold(N*'\u00D7'*L)*':'~bolditalic(F)==bold(\"%s\")*','~bolditalic(p)==bold(\"%s\")",
+      ")"
+    ),
+    f1, p1, f2, p2, f3, p3
+  )
+}
+
+shapiro_res <- da_e %>%
+  group_by(treatment2) %>%
+  summarise(W = shapiro.test(.data[[yvar]])$statistic,
+            p = shapiro.test(.data[[yvar]])$p.value,
+            .groups = "drop")
+lev <- leveneTest(as.formula(paste(yvar, "~ treatment2")), data = da_e)
+normal_ok <- all(shapiro_res$p > 0.05)
+var_ok    <- lev$`Pr(>F)`[1] > 0.05
+
+if (normal_ok && var_ok) {
+  method <- "Tukey HSD"
+} else if (normal_ok && !var_ok) {
+  method <- "Games-Howell"
+} else {
+  method <- "Kruskal-Wallis + Dunn"
+}
+
+cld_from_pairs <- function(groups, pairs, p_col = "p.adj", alpha = 0.05) {
+  groups <- as.character(groups)
+  n <- length(groups)
+  diff_mat <- matrix(FALSE, n, n, dimnames = list(groups, groups))
+  for (i in seq_len(nrow(pairs))) {
+    g1 <- as.character(pairs[[1]][i]); g2 <- as.character(pairs[[2]][i])
+    p  <- pairs[[p_col]][i]
+    if (!is.na(p) && p < alpha) {
+      diff_mat[g1, g2] <- TRUE; diff_mat[g2, g1] <- TRUE
+    }
+  }
+  letters_pool <- letters
+  assign <- rep(NA_character_, n); names(assign) <- groups
+  current_letter <- 1; remaining <- groups
+  while (length(remaining) > 0) {
+    grp_set <- remaining[1]
+    for (g in remaining[-1]) {
+      ok <- TRUE
+      for (h in grp_set) if (diff_mat[g, h]) { ok <- FALSE; break }
+      if (ok) grp_set <- c(grp_set, g)
+    }
+    for (g in grp_set) {
+      assign[g] <- ifelse(is.na(assign[g]), letters_pool[current_letter],
+                          paste0(assign[g], letters_pool[current_letter]))
+    }
+    remaining <- setdiff(remaining, grp_set)
+    current_letter <- current_letter + 1
+  }
+  data.frame(grp = groups, sig_lab = assign, stringsAsFactors = FALSE)
+}
+
+df2 <- data.frame(y = da_e[[yvar]], trt = da_e$treatment2)
+if (method == "Tukey HSD") {
+  fit <- aov(y ~ trt, data = df2)
+  hsd <- agricolae::HSD.test(fit, "trt", group = TRUE)
+  g   <- hsd$groups
+  lab <- data.frame(grp = rownames(g), sig_lab = as.character(g$groups),
+                    stringsAsFactors = FALSE)
+} else if (method == "Games-Howell") {
+  gh  <- rstatix::games_howell_test(df2, y ~ trt)
+  lab <- cld_from_pairs(unique(df2$trt), gh, p_col = "p.adj")
+} else {
+  dt  <- rstatix::dunn_test(df2, y ~ trt, p.adjust.method = "BH")
+  lab <- cld_from_pairs(unique(df2$trt), dt, p_col = "p.adj")
+}
+
+ymin <- min(da_e[[yvar]], na.rm = TRUE)
+ymax <- max(da_e[[yvar]], na.rm = TRUE)
+yran <- ymax - ymin
+
+mx <- da_e %>%
+  group_by(treatment2) %>%
+  summarise(max_y = max(.data[[yvar]], na.rm = TRUE) + 0.08 * yran,
+            .groups = "drop")
+lab <- left_join(lab, mx, by = c("grp" = "treatment2"))
+
+anova_txt <- anova_lab(da_e[[yvar]], da_e$N, da_e$L)
+
+p_e <- ggplot(da_e, aes(x = treatment2, y = .data[[yvar]])) +
+  geom_jitter(aes(fill = treatment2, color = treatment2),
+              shape = 21, stroke = 0.4,
+              position = position_jitterdodge(jitter.width = 0.15,
+                                              dodge.width  = 0.5),
+              size = 8, alpha = 0.8) +     # <--- 修改：点透明度改为 0.8
+  geom_boxplot(aes(fill = treatment2),
+               width = 0.5, alpha = 0.5, linewidth = 0.4, # <--- 修改：箱线图透明度微调至 0.5
+               position = position_dodge(0.5), outlier.shape = NA) +
+  scale_x_discrete(labels = trt_labs) +
+  scale_fill_manual(values = col11, labels = trt_labs) +
+  scale_color_manual(values = col11, labels = trt_labs) +
+  geom_text(data = lab, aes(x = grp, y = max_y, label = sig_lab),
+            size = 6, fontface = "bold", colour = "black",
+            inherit.aes = FALSE) +
+  labs(subtitle = parse(text = anova_txt),
+       fill = "Treatment", color = "Treatment",
+       x = "", y = ylab_ros) +
+  theme_bw() +
+  theme(
+    text = element_text(size = 12, colour = "black", face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5, size = 16, face = "bold",
+                                 colour = "black", lineheight = 1.1,
+                                 margin = margin(t = 0, b = 6)),
+    legend.position = "none",
+    axis.text.x  = element_text(colour = "black", size = 16, face = "bold"),
+    axis.text.y  = element_text(colour = "black", size = 10, face = "bold"),
+    axis.title.y = element_text(colour = "black", size = 16, face = "bold"),
+    axis.title.x = element_text(colour = "black", size = 16, face = "bold"),
+    axis.line    = element_line(colour = "black", linewidth = 0.6),
+    axis.ticks   = element_line(colour = "black", linewidth = 0.6),
+    panel.grid   = element_blank(),
+    panel.border = element_rect(fill = NA, color = "black",
+                                linewidth = 1, linetype = "solid"),
+    plot.margin  = margin(t = 10, r = 10, b = 10, l = 10)
+  ) +
+  scale_y_continuous(
+    limits = c(ymin - 0.05 * yran, ymax + 0.30 * yran),
+    expand = c(0, 0)
+  )
+
+# ==================================================================
+# Plot F: ARG5_CARD ~ ROS (Spearman)
+# ==================================================================
+da_f <- read_excel("~/Desktop/codes/data/Ex_Fig3_data.xlsx", sheet = "exp2b")
+da_f$treatment2 <- factor(da_f$treatment2,
+                          levels = c("N0-L0", "N20-L0", "N0-L45", "N20-L45"))
+
+xvar    <- "ROS"
+yvar_f  <- "ARG5_CARD"
+xlab_text <- "Relative abundance of ROS-related genes (\u00D7/Gb)"
+ylab_text <- "Relative abundance of ARGs (\u00D7/Gb)"
+
+cor_res <- cor.test(da_f[[xvar]], da_f[[yvar_f]],
+                    method = "spearman", exact = FALSE)
+rho_val <- round(cor_res$estimate, 3)
+p_val   <- format(cor_res$p.value, scientific = TRUE, digits = 3)
+
+cor_label <- paste0("atop(bolditalic(rho) == bold(\"", rho_val,
+                    "\"), bolditalic(p) == bold(\"", p_val, "\"))")
+
+x_min <- min(da_f[[xvar]], na.rm = TRUE); x_max <- max(da_f[[xvar]], na.rm = TRUE)
+y_min <- min(da_f[[yvar_f]], na.rm = TRUE); y_max <- max(da_f[[yvar_f]], na.rm = TRUE)
+
+anno_x <- x_min + 0.05 * (x_max - x_min)
+anno_y <- y_max - 0.15 * (y_max - y_min)
+
+p_f <- ggplot(data = da_f, aes(x = .data[[xvar]], y = .data[[yvar_f]],
+                               colour = treatment2)) +
+  geom_point(alpha = 0.8, size = 8) +        # <--- 修改：点透明度改为 0.8
+  geom_smooth(
+    method  = 'lm',
+    formula = y ~ poly(x, 1, raw = TRUE),
+    level   = 0.95, se = TRUE, size = 2, alpha = 0.3, # <--- 修改：拟合线阴影透明度微调至 0.3
+    color   = "black", fill = "grey70"
+  ) +
+  scale_colour_manual(values = col11, labels = trt_labs) +
+  annotate("text", x = anno_x, y = anno_y,
+           label = cor_label, parse = TRUE,
+           size = 6, colour = "black", hjust = 0) +
+  labs(x = xlab_text, y = ylab_text, colour = "Treatment") +
+  theme_bw() +
+  theme(
+    text = element_text(size = 12, family = "sans", colour = "black", face = "bold"),
+    axis.text  = element_text(colour = "black", size = 10, face = "bold"),
+    axis.title = element_text(colour = "black", size = 16, face = "bold"),
+    legend.title = element_text(size = 16, face = "bold"),
+    legend.text  = element_text(size = 16, face = "bold"),
+    legend.position = "right",
+    panel.border = element_rect(fill = NA, color = "black",
+                                size = 1.5, linetype = "solid"),
+    panel.grid = element_blank()
+  )
+
+# ==================================================================
+# 横向合并：左 e，右 f
+# ==================================================================
+combined <- (p_e | p_f) +
+  plot_annotation(tag_levels = list(c("e", "f"))) &
+  theme(
+    plot.tag = element_text(size = 24, face = "bold")
+  )
+
+print(combined)
+
+ggsave("~/Desktop/codes/figures/Ex_Fig3ef.pdf",
+       combined, width = 13, height = 6.5, dpi = 600)
+```
+
+```{r,fig.width=13,fig.height=6.5}
+setwd("~/Desktop/codes")
+rm(list = ls())
+
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(agricolae)
+library(car)
+library(patchwork)
+
+# ==================================================================
+# Plot G: ROS ~ treatment2 (two-way ANOVA + Tukey HSD)
+# ==================================================================
+da_g <- read_excel("~/Desktop/codes/data/Ex_Fig3_data.xlsx", sheet = "exp2c")
+da_g$treatment2 <- factor(da_g$treatment2,
+                          levels = c("N0-C0", "N50-C0", "N0-C2000", "N50-C2000"))
+
+da_g$N <- factor(sub("-.*", "", as.character(da_g$treatment2)), levels = c("N0", "N50"))
+da_g$C <- factor(sub(".*-", "", as.character(da_g$treatment2)), levels = c("C0", "C2000"))
+
+yvar      <- "ROS"
+ylab_ros  <- "Relative abundance of ROS-related genes (\u00D7/Gb)"
+
+col11 <- c("#7D7D7D", "#CC4125", "#F5C87A", "#8FD3F4")
+
+trt_labs <- c(
+  "N0-C0"     = "Control",
+  "N50-C0"    = "N",
+  "N0-C2000"  = "C",
+  "N50-C2000" = "N+C"
+)
+
+# ===== 双因素 ANOVA 文本：两行，N/C 在上，N×C 在下 =====
+anova_lab <- function(y, N, C) {
+  df_tmp <- data.frame(y = y, N = N, C = C)
+  fit <- aov(y ~ N * C, data = df_tmp)
+  anova3 <- Anova(fit, type = "III")
+  s   <- as.data.frame(anova3)
+  
+  fmt <- function(x) ifelse(is.na(x), "NA",
+                            ifelse(x < 0.001,
+                                   format(x, scientific = TRUE, digits = 3),
+                                   sprintf("%.3f", x)))
+  f1 <- fmt(s["N", "F value"]); p1 <- fmt(s["N", "Pr(>F)"])
+  f2 <- fmt(s["C", "F value"]); p2 <- fmt(s["C", "Pr(>F)"])
+  f3 <- fmt(s["N:C", "F value"]); p3 <- fmt(s["N:C", "Pr(>F)"])
+  
+  sprintf(
+    paste0(
+      "atop(",
+      "bold(N)*':'~bolditalic(F)==bold(\"%s\")*','~bolditalic(p)==bold(\"%s\")*'   '*",
+      "bold(C)*':'~bolditalic(F)==bold(\"%s\")*','~bolditalic(p)==bold(\"%s\"), ",
+      "bold(N*'\u00D7'*C)*':'~bolditalic(F)==bold(\"%s\")*','~bolditalic(p)==bold(\"%s\")",
+      ")"
+    ),
+    f1, p1, f2, p2, f3, p3
+  )
+}
+
+df2 <- data.frame(y = da_g[[yvar]], trt = da_g$treatment2)
+fit_trt <- aov(y ~ trt, data = df2)
+hsd <- agricolae::HSD.test(fit_trt, "trt", group = TRUE, console = FALSE)
+lab <- data.frame(
+  grp = rownames(hsd$groups),
+  sig_lab = as.character(hsd$groups$groups),
+  stringsAsFactors = FALSE
+)
+
+ymin <- min(da_g[[yvar]], na.rm = TRUE)
+ymax <- max(da_g[[yvar]], na.rm = TRUE)
+yran <- ymax - ymin
+
+mx <- da_g %>%
+  group_by(treatment2) %>%
+  summarise(max_y = max(.data[[yvar]], na.rm = TRUE) + 0.08 * yran,
+            .groups = "drop")
+
+lab <- left_join(lab, mx, by = c("grp" = "treatment2"))
+
+anova_txt <- anova_lab(da_g[[yvar]], da_g$N, da_g$C)
+
+p_g <- ggplot(da_g, aes(x = treatment2, y = .data[[yvar]])) +
+  geom_jitter(aes(fill = treatment2, color = treatment2),
+              position = position_dodge(0.5),
+              size = 8, alpha = 0.8) +   # 保持 0.8 不变
+  geom_boxplot(aes(fill = treatment2),
+               width = 0.5, alpha = 0.6, linewidth = 0.4,
+               position = position_dodge(0.5), outlier.shape = NA) +
+  scale_x_discrete(labels = trt_labs) +
+  scale_fill_manual(values = col11, labels = trt_labs) +
+  scale_color_manual(values = col11, labels = trt_labs) +
+  geom_text(data = lab, aes(x = grp, y = max_y, label = sig_lab),
+            size = 6, fontface = "bold", colour = "black",
+            inherit.aes = FALSE) +
+  labs(
+    subtitle = parse(text = anova_txt),
+    fill     = "Treatment",
+    color    = "Treatment",
+    x        = "",
+    y        = ylab_ros
+  ) +
+  theme_bw() +
+  theme(
+    text = element_text(size = 12, colour = "black", face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5, size = 16,
+                                 face = "bold", colour = "black",
+                                 lineheight = 1.1,
+                                 margin = margin(t = 0, b = 6)),
+    legend.position = "none",
+    axis.text.x  = element_text(colour = "black", size = 16, face = "bold"),
+    axis.text.y  = element_text(colour = "black", size = 10, face = "bold"),
+    axis.title.y = element_text(colour = "black", size = 16, face = "bold"),
+    axis.title.x = element_text(colour = "black", size = 16, face = "bold"),
+    axis.line    = element_line(colour = "black", linewidth = 0.6),
+    axis.ticks   = element_line(colour = "black", linewidth = 0.6),
+    panel.grid   = element_blank(),
+    panel.border = element_rect(fill = NA, color = "black",
+                                linewidth = 1, linetype = "solid"),
+    plot.margin  = margin(t = 10, r = 10, b = 10, l = 10)
+  ) +
+  scale_y_continuous(
+    limits = c(ymin - 0.05 * yran, ymax + 0.30 * yran),
+    expand = c(0, 0)
+  )
+
+# ==================================================================
+# Plot H: ARG ~ ROS (Spearman)
+# ==================================================================
+da_h <- read_excel("~/Desktop/codes/data/Ex_Fig3_data.xlsx", sheet = "exp2c")
+da_h$treatment2 <- factor(da_h$treatment2,
+                          levels = c("N0-C0", "N50-C0", "N0-C2000", "N50-C2000"))
+
+xvar <- "ROS"
+yvar_h <- "ARG"
+xlab_text <- "Relative abundance of ROS-related genes (\u00D7/Gb)"
+ylab_text <- "Relative abundance of ARGs (\u00D7/Gb)"
+
+cor_res <- cor.test(da_h[[xvar]], da_h[[yvar_h]],
+                    method = "spearman", exact = FALSE)
+
+rho_val <- round(cor_res$estimate, 3)
+p_val   <- format(cor_res$p.value, scientific = TRUE, digits = 3)
+
+cor_label <- paste0(
+  "atop(bold(bolditalic(rho) == \"", rho_val, "\"), ",
+  "bold(bolditalic(p) == \"", p_val, "\"))"
+)
+
+x_min <- min(da_h[[xvar]], na.rm = TRUE)
+x_max <- max(da_h[[xvar]], na.rm = TRUE)
+y_min <- min(da_h[[yvar_h]], na.rm = TRUE)
+y_max <- max(da_h[[yvar_h]], na.rm = TRUE)
+
+anno_x <- x_min + 0.05 * (x_max - x_min)
+anno_y <- y_max - 0.15 * (y_max - y_min)
+
+p_h <- ggplot(data = da_h, aes(x = .data[[xvar]], y = .data[[yvar_h]],
+                               colour = treatment2)) +
+  geom_point(alpha = 0.8, size = 8) +    # <--- 修改：透明度改为 0.8，与图 g 一致
+  geom_smooth(
+    method  = 'lm',
+    formula = y ~ poly(x, 1, raw = TRUE),
+    level   = 0.95,
+    se      = TRUE,
+    size    = 2,
+    alpha   = 0.3,                       # <--- 修改：阴影透明度降至 0.3，防止点发灰
+    color   = "black",
+    fill    = "grey70"
+  ) +
+  scale_colour_manual(values = col11, labels = trt_labs) +
+  annotate("text", x = anno_x, y = anno_y,
+           label = cor_label,
+           parse = TRUE,
+           size = 8, colour = "black", hjust = 0) +
+  labs(
+    x = xlab_text,
+    y = ylab_text,
+    colour = "Treatment"
+  ) +
+  theme_bw() +
+  theme(
+    text = element_text(size = 12, family = "sans", colour = "black", face = "bold"),
+    axis.text  = element_text(colour = "black", size = 10, face = "bold"),
+    axis.title = element_text(colour = "black", size = 16, face = "bold"),
+    legend.title = element_text(size = 16, face = "bold"),
+    legend.text  = element_text(size = 16, face = "bold"),
+    legend.position = "right",
+    panel.border = element_rect(fill = NA, color = "black",
+                                size = 1.5, linetype = "solid"),
+    panel.grid = element_blank()
+  )
+
+# ==================================================================
+# 横向合并：左 g，右 h
+# ==================================================================
+combined <- (p_g | p_h) +
+  plot_annotation(tag_levels = list(c("g", "h"))) &
+  theme(
+    plot.tag = element_text(size = 24, face = "bold")
+  )
+
+print(combined)
+
+ggsave("~/Desktop/codes/figures/Ex_Fig3gh.pdf",
+       combined, width = 13, height = 6.5, dpi = 600)
+```

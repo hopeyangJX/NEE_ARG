@@ -1,0 +1,454 @@
+---
+title: "Ex_Fig2"
+output: html_document
+date: "2026-10-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars,fig.width=16,fig.height=15}
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+rm(list=ls())
+setwd("~/Desktop/codes")
+dat <- read_excel("~/Desktop/codes/data/Ex_Fig2_data.xlsx", sheet = "metals")
+
+# Molar mass (g/mol), used to convert measured mg/L -> mol/L
+molar_mass <- c(Cu = 63.546, Fe = 55.845, Mn = 54.938)
+
+# Generic plotting function
+# dat: data frame, m: metal name, xvar: x-axis variable name, yvar: y-axis variable name
+# xlab: x-axis label, ylab: y-axis label, tag: subplot tag (a, b, c, ...)
+plot_metal <- function(dat, m, xvar, yvar, xlab, ylab, tag) {
+  M <- molar_mass[[m]]
+  meas <- m
+  pred <- paste0(m, "_con")
+  
+  # Data processing
+  d <- dat %>%
+    select(Nlevel, pH, measured = all_of(meas), predicted = all_of(pred)) %>%
+    filter(!is.na(measured), !is.na(predicted), measured > 0, predicted > 0) %>%
+    mutate(
+      Nlevel = as.numeric(Nlevel),
+      measured_molL = measured / (1000 * M),
+      log10_measured = log10(measured_molL),
+      log10_predicted = log10(predicted)
+    )
+  
+  # Extract x and y vectors to compute Spearman correlation
+  x_vec <- d[[xvar]]
+  y_vec <- d[[yvar]]
+  
+  ct <- suppressWarnings(cor.test(x_vec, y_vec, method = "spearman"))
+  rho_val <- round(unname(ct$estimate), 3)
+  p_raw   <- ct$p.value
+  
+  # ===== Handle p-value =====
+  # If p underflows to 0 (or is below machine precision), report "p < 2.2e-16"
+  # instead of the misleading "p = 0.00e+00".
+  if (p_raw == 0 || p_raw < .Machine$double.eps) {
+    p_expr <- 'italic(p) < "2.2e-16"'
+  } else {
+    p_expr <- paste0('italic(p) == "', sprintf("%.2e", p_raw), '"')
+  }
+  
+  # plotmath expression: italic rho and italic p on two rows
+  lab <- paste0("atop(italic(rho) == ", rho_val, ", ", p_expr, ")")
+  
+  # Get data range to anchor the statistics label at the bottom-right corner
+  x_max <- max(x_vec, na.rm = TRUE)
+  y_min <- min(y_vec, na.rm = TRUE)
+  
+  ggplot(d, aes(x = .data[[xvar]], y = .data[[yvar]], color = pH)) +
+    geom_point(size = 6.5, alpha = 1) +
+    geom_smooth(method = "lm", se = TRUE, color = "black", linewidth = 0.6) +
+    scale_color_viridis_c(option = "A", name = "pH") +
+    annotate("text",
+             x = x_max, y = y_min,
+             label = lab,
+             parse = TRUE,          # ← 解析 plotmath 表达式
+             hjust = 1, vjust = 0,
+             size = 6.5,            # ← 统计标签字号（原 4.5）
+             fontface = "bold") +
+    labs(x = xlab, y = ylab, tag = tag) + # add tag here
+    theme_classic(base_size = 11) +
+    theme(
+      axis.title = element_text(color = "black", face = "bold", size = 13),
+      axis.text  = element_text(color = "black", size = 12),
+      axis.ticks = element_line(color = "black"),
+      panel.border = element_rect(fill = NA, color = "black", linewidth = 1.5, linetype = "solid"),
+      plot.tag = element_text(face = "bold", size = 22) # enlarged bold tag
+    )
+}
+
+# Shared x-axis label
+xlab_n <- bquote(bold(N~addition~levels~(g~N~m^-2~yr^-1)))
+
+# Generate 9 plots, strictly following row order: Fe, Mn, Cu
+
+# --- First row: Fe ---
+p_a <- plot_metal(dat, "Fe", "Nlevel", "log10_measured", xlab_n, "log10 measured Fe (mol/L, by ICP)", "a")
+p_d <- plot_metal(dat, "Fe", "Nlevel", "log10_predicted", xlab_n, "log10 predicted Fe (mol/L, by Visual MINTEQ)", "d")
+p_g <- plot_metal(dat, "Fe", "log10_measured", "log10_predicted", "log10 measured Fe (mol/L, by ICP)", "log10 predicted Fe (mol/L, by Visual MINTEQ)", "g")
+
+# --- Second row: Mn ---
+p_b <- plot_metal(dat, "Mn", "Nlevel", "log10_measured", xlab_n, "log10 measured Mn (mol/L, by ICP)", "b")
+p_e <- plot_metal(dat, "Mn", "Nlevel", "log10_predicted", xlab_n, "log10 predicted Mn (mol/L, by Visual MINTEQ)", "e")
+p_h <- plot_metal(dat, "Mn", "log10_measured", "log10_predicted", "log10 measured Mn (mol/L, by ICP)", "log10 predicted Mn (mol/L, by Visual MINTEQ)", "h")
+
+# --- Third row: Cu ---
+p_c <- plot_metal(dat, "Cu", "Nlevel", "log10_measured", xlab_n, "log10 measured Cu (mol/L, by ICP)", "c")
+p_f <- plot_metal(dat, "Cu", "Nlevel", "log10_predicted", xlab_n, "log10 predicted Cu (mol/L, by Visual MINTEQ)", "f")
+p_i <- plot_metal(dat, "Cu", "log10_measured", "log10_predicted", "log10 measured Cu (mol/L, by ICP)", "log10 predicted Cu (mol/L, by Visual MINTEQ)", "i")
+
+# Combine by column (vertical stacking /)
+col1 <- p_a / p_b / p_c  # First column (a, b, c)
+col2 <- p_d / p_e / p_f  # Second column (d, e, f)
+col3 <- p_g / p_h / p_i  # Third column (g, h, i)
+
+# Merge the three columns horizontally (horizontal |)
+combined <- (col1 | col2 | col3) +
+  plot_layout(guides = "collect") &
+  theme(
+    # Place legend at the bottom, positioned lower
+    legend.position = "bottom",
+    legend.direction = "horizontal",
+    # Increase legend font size
+    legend.title = element_text(size = 16, face = "bold"),
+    legend.text  = element_text(size = 15),
+    # Push legend lower: reduce bottom margin and increase top spacing
+    legend.margin = margin(t = 5, r = 10, b = 0, l = 10),
+    legend.box.spacing = unit(0.3, "cm"),
+    # Adjust overall margins to give the legend more space
+    plot.margin = margin(t = 5, r = 10, b = 5, l = 10)
+  )
+print(combined)
+# Save figure (increase height appropriately to leave room for the bottom legend)
+ggsave("~/Desktop/codes/figures/Ex_Fig2a-i.pdf", combined, width = 16, height = 15, dpi = 300)
+```
+
+```{r,fig.width=6,fig.height=15}
+rm(list=ls())
+setwd("~/Desktop/codes")
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(ggthemes)
+library(ggtext)   # ★ 用于渲染 y 轴下标
+
+plot_data1 <- read_excel("~/Desktop/codes/data/Ex_Fig2_data.xlsx", sheet = "femncu")
+plot_data1[is.na(plot_data1)] <- ""
+plot_data1 <- plot_data1 %>% filter(group %in% c("Fe", "Mn", "Cu"))
+
+custom_colors <- c("N50cont" = "red", "N50cess" = "blue")
+plot_data <- plot_data1
+
+plot_data$significant <- ifelse(plot_data$pval < 0.05, "Significant", "Non-significant")
+plot_data$fill_color <- ifelse(plot_data$significant == "Significant",
+                               custom_colors[plot_data$Subgroup],
+                               "white")
+plot_data$point_shape <- ifelse(plot_data$significant == "Significant", 16, 21)
+plot_data$Subgroup <- factor(plot_data$Subgroup, levels = c("YN50", "NN50"))
+plot_data$Subgroup <- factor(plot_data$Subgroup, labels = c("N50cont", "N50cess"))
+
+plot_data$group <- factor(plot_data$group, levels = c("Fe", "Mn", "Cu"))
+plot_data$group <- factor(plot_data$group,
+                          labels = c("Available Fe",
+                                     "Available Mn",
+                                     "Available Cu"))
+
+# p label as plotmath expression
+plot_data <- plot_data %>%
+  mutate(
+    label_x = estimate,
+    label_y = as.numeric(Subgroup) + 0.15,
+    p_label = ifelse(pval < 0.001,
+                     paste0("italic(p) == \"", sprintf("%.1e", pval), "\""),
+                     paste0("italic(p) == \"", as.character(signif(pval, 3)), "\""))
+  )
+
+p <- ggplot(plot_data, aes(x = estimate, y = Subgroup)) +
+  facet_wrap(.~group, ncol = 1) +
+  geom_errorbarh(aes(xmax = estimate + 1.96 * se,
+                     xmin = estimate - 1.96 * se,
+                     color = Subgroup,
+                     linetype = "95% CI"),
+                 size = 2, height = 0, alpha = 0.5) +
+  geom_errorbarh(aes(xmax = estimate + se,
+                     xmin = estimate - se,
+                     color = Subgroup,
+                     linetype = "±SE"),      
+                 size = 3.5, height = 0, alpha = 0.5) +
+  geom_point(aes(fill = fill_color, color = Subgroup, shape = significant),
+             size = 11, stroke = 1.8, alpha = 0.5) +
+  geom_text(aes(x = label_x, y = label_y, label = p_label, color = Subgroup),
+            size = 6.5, hjust = 0.42, vjust = 0.1, fontface = "bold",
+            parse = TRUE,
+            show.legend = FALSE) +
+  scale_color_manual(values = custom_colors, name = "Treatment") +
+  scale_fill_identity() +
+  scale_y_discrete(
+    labels = c("N50<sub>cont</sub>",
+               "N50<sub>cess</sub>")
+  ) +
+  scale_shape_manual(name = "Significance",
+                     values = c("Significant" = 16, "Non-significant" = 21),
+                     labels = c("Significant" = "p < 0.05",
+                                "Non-significant" = "p > 0.05")) +
+  scale_linetype_manual(name = "Error bars",
+                        values = c("95% CI" = "solid", "±SE" = "solid"),  
+                        guide = guide_legend(override.aes = list(
+                          size = c(2, 3.5),
+                          alpha = c(0.4, 0.7),
+                          color = "black"))) +
+  geom_vline(xintercept = 0, color = "gray", linetype = "dashed", alpha = 0.5, size = 1.5) +
+  labs(x = 'Effect size of nitrogen addition (LRR)',
+       y = '',
+       title = " ") +
+  theme_few() +
+  theme(
+    axis.text.x = element_text(size = 12, color = "black", face = "bold"),
+    # ★ 修改点 1：将 y 轴标签（N50cont / N50cess）字体放大（12 -> 16）
+    axis.text.y = element_markdown(size = 16, color = "black", face = "bold"),
+    title = element_text(size = 14),
+    legend.position = "none",
+    axis.title.x = element_text(size = 16, face = "bold"),
+    # ★ 修改点 2：将 y 轴真实标题（title）放大（16 -> 20，虽然目前 title 是空的）
+    axis.title.y = element_text(size = 20, face = "bold"), 
+    plot.title = element_text(hjust = 0.5, size = 18, face = "bold"),
+    strip.text = element_text(size = 15, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5, size = 10),
+    panel.border = element_rect(fill = NA, color = "black", size = 1.5, linetype = "solid"),
+    panel.spacing.y = unit(1.0, "cm")
+  )
+print(p)
+ggsave("~/Desktop/codes/figures/Ex_Fig2jkl.pdf", width = 6, height = 15, dpi = 300)
+```
+
+```{r,fig.width=5,fig.height=14}
+rm(list = ls())
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(ggsignif)
+library(tibble)
+library(patchwork)   # for combining plots vertically
+library(readxl)
+library(ggtext)      # ★ 新增：用于渲染 x 轴的下标
+setwd("~/Desktop/codes")
+
+# 颜色：正红 / 正蓝
+col_blue <- "blue"
+col_red  <- "red"
+col_ctrl <- "#c4c4c4"
+
+# ---------- General plotting function ----------
+plot_amcc <- function(metric, ylab_text, title_text, out_csv = NULL) {
+  
+  df <- read_excel("~/Desktop/codes/data/Ex_fig2_data.xlsx", sheet = "mrg")
+  
+  # Recode TR: YN50 -> N50cont, NN50 -> N50cess, N0 -> Control
+  df <- df %>%
+    mutate(TR = case_when(
+      TR == "YN50" ~ "N50cont",
+      TR == "NN50" ~ "N50cess",
+      TR == "N0"   ~ "Control"
+    )) %>%
+    drop_na(all_of(metric))
+  
+  # Factor order: Control -> N50cess -> N50cont
+  df$TR <- factor(df$TR, levels = c("Control", "N50cess", "N50cont"))
+  
+  # Sample size per group
+  cat("\n======== ", metric, " sample counts per group ========\n")
+  print(table(df$TR))
+  
+  # Extract values per group
+  Control <- df %>% filter(TR == "Control") %>% pull(all_of(metric))
+  N50cess <- df %>% filter(TR == "N50cess") %>% pull(all_of(metric))
+  N50cont <- df %>% filter(TR == "N50cont") %>% pull(all_of(metric))
+  
+  # ---------- 1. Welch's t-test (planned comparisons) ----------
+  t1 <- t.test(N50cess, Control, var.equal = FALSE)
+  t2 <- t.test(N50cont, Control, var.equal = FALSE)
+  
+  p_raw <- c(t1$p.value, t2$p.value)
+  
+  cat("\n--- ", metric, " Welch's t-test (uncorrected, planned comparisons) ---\n")
+  cat("N50cess vs Control: t =", round(t1$statistic, 3),
+      " df =", round(t1$parameter, 2),
+      " p =", p_raw[1], "\n")
+  cat("N50cont vs Control: t =", round(t2$statistic, 3),
+      " df =", round(t2$parameter, 2),
+      " p =", p_raw[2], "\n")
+  
+  # ---------- 2. Annotation text (bold italic t and p, bold values) ----------
+  annot_text <- c(
+    sprintf("bolditalic(t) == bold('%.2f') * ',' ~ bolditalic(p) == bold('%.3f')",
+            t1$statistic, p_raw[1]),
+    sprintf("bolditalic(t) == bold('%.2f') * ',' ~ bolditalic(p) == bold('%.3f')",
+            t2$statistic, p_raw[2])
+  )
+  
+  # ---------- 3. Bracket positions based on data range ----------
+  y_max   <- max(df[[metric]], na.rm = TRUE)
+  y_min   <- min(df[[metric]], na.rm = TRUE)
+  y_range <- y_max - y_min
+  
+  bracket_y1 <- y_max + y_range * 0.10   # lower bracket (Control vs N50cess)
+  bracket_y2 <- y_max + y_range * 0.30   # upper bracket (Control vs N50cont)
+  y_top      <- y_max + y_range * 0.65   # 为放大的标签留白
+  
+  # ---------- 4. Plot ----------
+  p <- ggplot(df, aes(x = TR, y = .data[[metric]], fill = TR)) +
+    geom_boxplot(width = 0.6, colour = "black", linewidth = 0.3,
+                 alpha = 0.5, outlier.shape = NA) +
+    geom_point(aes(color = TR),
+               size = 5.5, alpha = 0.5,
+               position = position_jitter(width = 0.12, height = 0, seed = 1),
+               show.legend = FALSE) +
+    scale_fill_manual(
+      name = "Treatment",
+      values = c(
+        "Control" = col_ctrl,
+        "N50cess" = col_blue,
+        "N50cont" = col_red
+      )
+    ) +
+    scale_color_manual(
+      name = "Treatment",
+      values = c(
+        "Control" = col_ctrl,
+        "N50cess" = col_blue,
+        "N50cont" = col_red
+      )
+    ) +
+    # ★ x 轴标签改为带下标的 HTML 格式
+    scale_x_discrete(
+      labels = c("Control",
+                 "N50<sub>cess</sub>",
+                 "N50<sub>cont</sub>")
+    ) +
+    scale_y_continuous(
+      limits = c(NA, y_top),
+      expand = expansion(mult = c(0.05, 0.02))
+    ) +
+    xlab(" ") +
+    ylab(ylab_text) +
+    ggtitle(title_text) +
+    # ★ 第一次 geom_signif：Control vs N50cess（正蓝）
+    ggsignif::geom_signif(
+      comparisons     = list(c("Control", "N50cess")),
+      annotations     = annot_text[1],
+      y_position      = bracket_y1,
+      step_increase   = 0,
+      tip_length      = 0.015,
+      vjust           = -0.25,
+      textsize        = 5.5,
+      parse           = TRUE,
+      map_signif_level = FALSE,
+      color           = col_blue
+    ) +
+    # ★ 第二次 geom_signif：Control vs N50cont（正红）
+    ggsignif::geom_signif(
+      comparisons     = list(c("Control", "N50cont")),
+      annotations     = annot_text[2],
+      y_position      = bracket_y2,
+      step_increase   = 0,
+      tip_length      = 0.015,
+      vjust           = -0.25,
+      textsize        = 5.5,
+      parse           = TRUE,
+      map_signif_level = FALSE,
+      color           = col_red
+    ) +
+    theme_bw() +
+    theme(
+      text = element_text(size = 16, family = "sans"),
+      plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+      # ★ 拆分 axis.text：x 轴用 element_markdown 渲染下标
+      axis.text.x = element_markdown(colour = "black", size = 18, face = "bold"),
+      axis.text.y = element_text(colour = "black", size = 16, face = "bold"),
+      axis.title = element_text(colour = "black", size = 16, face = "bold"),
+      panel.border = element_rect(fill = NA, color = "black", size = 1.5, linetype = "solid"),
+      strip.text = element_text(size = 16, face = "bold"),
+      legend.title = element_text(size = 16, face = "bold"),
+      legend.text = element_text(size = 16),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      legend.position = "none"
+    )
+  
+  # ---------- 5. Optional CSV of statistical results ----------
+  if (!is.null(out_csv)) {
+    stat_res <- tibble(
+      comparison    = c("N50cess vs Control", "N50cont vs Control"),
+      group1        = c("N50cess", "N50cont"),
+      group2        = c("Control", "Control"),
+      n_group1      = c(length(N50cess), length(N50cont)),
+      n_group2      = c(length(Control), length(Control)),
+      mean_group1   = c(mean(N50cess, na.rm = TRUE), mean(N50cont, na.rm = TRUE)),
+      mean_group2   = c(mean(Control, na.rm = TRUE), mean(Control, na.rm = TRUE)),
+      sd_group1     = c(sd(N50cess, na.rm = TRUE), sd(N50cont, na.rm = TRUE)),
+      sd_group2     = c(sd(Control, na.rm = TRUE), sd(Control, na.rm = TRUE)),
+      t_statistic   = c(as.numeric(t1$statistic), as.numeric(t2$statistic)),
+      df            = c(as.numeric(t1$parameter), as.numeric(t2$parameter)),
+      p_value       = p_raw,
+      test_method   = "Welch's t-test (uncorrected, planned comparisons)"
+    )
+    write.csv(stat_res, out_csv, row.names = FALSE)
+  }
+  
+  return(p)
+}
+
+# ============================================================
+#  Build the three panels
+# ============================================================
+p_cu <- plot_amcc(
+  metric     = "cu_amcc",
+  ylab_text  = "Relative abundance of AMCC-Cu (×/Gb)",
+  title_text = "ARG-MRG (Cu) co-located contigs (AMCC-Cu)",
+  out_csv    = "~/Desktop/codes/tables/fig2m_Cu_AMCC_WelchT_stat_result.csv"
+)
+
+p_mn <- plot_amcc(
+  metric     = "mn_amcc",
+  ylab_text  = "Relative abundance of AMCC-Mn (×/Gb)",
+  title_text = "ARG-MRG (Mn) co-located contigs (AMCC-Mn)",
+  out_csv    = "~/Desktop/codes/tables/ex_fig2n_Mn_AMCC_WelchT_stat_result.csv"
+)
+
+p_fe <- plot_amcc(
+  metric     = "fe_amcc",
+  ylab_text  = "Relative abundance of AMCC-Fe (×/Gb)",
+  title_text = "ARG-MRG (Fe) co-located contigs (AMCC-Fe)",
+  out_csv    = "~/Desktop/codes/tables/ex_fig2o_Fe_AMCC_WelchT_stat_result.csv"
+)
+
+# ============================================================
+#  Merge the three plots vertically (no a/b/c tags)
+# ============================================================
+combined <- p_cu / p_mn / p_fe
+
+print(combined)
+
+# ============================================================
+#  Export the combined figure (saved under codes/figures/)
+# ============================================================
+ggsave("~/Desktop/codes/figures/Ex_Fig2mno.pdf",
+       combined, width = 5, height = 14, dpi = 300)
+
+# View statistical results
+read.csv("~/Desktop/codes/tables/Ex_Fig2o_Fe_AMCC_WelchT_stat_result.csv")
+```

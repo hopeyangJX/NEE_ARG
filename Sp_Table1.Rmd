@@ -1,0 +1,550 @@
+---
+title: "Sp_Table1"
+output: html_document
+date: "2026-10-30"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+```{r}
+# Clear environment
+rm(list = ls())
+
+# Load packages
+library(readxl)
+library(dplyr)
+library(emmeans)
+library(multcomp)
+library(writexl)
+
+# Read data
+setwd("~/Desktop/codes")
+dat <- read_excel("~/Desktop/codes/data/Sp_Table1.xlsx", sheet = "Sheet1")
+
+# Factor settings
+dat$Nadd   <- factor(dat$Nadd, levels = c("Ncont", "Ncess"))
+dat$Nlevel <- factor(dat$Nlevel, levels = c("N0","N02","N05","N10","N15","N20","N50"))
+dat$Block  <- factor(dat$Block)
+
+# ==================== Analysis for pH ====================
+analyze_pH <- function(data, group_name, letter_type) {
+  model <- aov(pH ~ Nlevel + Block, data = data)
+  emm   <- emmeans(model, "Nlevel")
+  cl    <- cld(emm, Letters = letters, adjust = "tukey", reversed = TRUE)  # ← Tukey
+  
+  letters_df <- as.data.frame(cl) %>% dplyr::select(Nlevel, .group)
+  
+  stats <- data %>%
+    dplyr::group_by(Nlevel) %>%
+    dplyr::summarise(
+      Mean = round(mean(pH, na.rm = TRUE), 3),
+      SE   = round(sd(pH, na.rm = TRUE) / sqrt(n()), 3),
+      .groups = "drop"
+    )
+  
+  dplyr::left_join(stats, letters_df, by = "Nlevel")
+}
+
+# ==================== Run analysis ====================
+res_Ncont <- dat %>% dplyr::filter(Nadd == "Ncont") %>% analyze_pH("Ncont", letters)
+res_Ncess <- dat %>% dplyr::filter(Nadd == "Ncess") %>% analyze_pH("Ncess", letters)
+
+# ==================== Combine results ====================
+res_Ncont$Nadd <- "Ncont"
+res_Ncess$Nadd <- "Ncess"
+
+final <- dplyr::bind_rows(res_Ncont, res_Ncess) %>%
+  dplyr::select(Nadd, Nlevel, Mean, SE, .group) %>%
+  dplyr::rename(Letter = .group)
+
+# View results
+print(final, n = Inf)
+
+# Export to Excel
+write_xlsx(final, "~/Desktop/codes/tables/Sp_table1_pH.xlsx")
+cat("\n✅ Analysis completed! Results exported successfully.\n")
+```
+
+
+```{r}
+# Clear environment
+rm(list = ls())
+
+# Load packages
+library(readxl)
+library(dplyr)
+library(emmeans)
+library(multcomp)
+library(writexl)
+
+# Read data
+setwd("~/Desktop/codes")
+dat <- read_excel("~/Desktop/codes/data/Sp_Table1.xlsx", sheet = "Sheet1")
+
+# Factor settings
+dat$Nadd   <- factor(dat$Nadd, levels = c("Ncont", "Ncess"))
+dat$Nlevel <- factor(dat$Nlevel, levels = c("N0","N02","N05","N10","N15","N20","N50"))
+dat$Block  <- factor(dat$Block)
+
+# ==================== Analysis for NH4 ====================
+analyze_NH4 <- function(data, group_name, letter_type) {
+  model <- aov(NH4 ~ Nlevel + Block, data = data)
+  emm   <- emmeans(model, "Nlevel")
+  cl    <- cld(emm, Letters = letters, adjust = "tukey", reversed = TRUE)  # ← Tukey
+  
+  letters_df <- as.data.frame(cl) %>% dplyr::select(Nlevel, .group)
+  
+  stats <- data %>%
+    dplyr::group_by(Nlevel) %>%
+    dplyr::summarise(
+      Mean = round(mean(NH4, na.rm = TRUE), 3),
+      SE   = round(sd(NH4, na.rm = TRUE) / sqrt(n()), 3),
+      .groups = "drop"
+    )
+  
+  dplyr::left_join(stats, letters_df, by = "Nlevel")
+}
+
+# ==================== Run analysis ====================
+res_Ncont <- dat %>% dplyr::filter(Nadd == "Ncont") %>% analyze_NH4("Ncont", letters)
+res_Ncess <- dat %>% dplyr::filter(Nadd == "Ncess") %>% analyze_NH4("Ncess", letters)
+
+# ==================== Combine results ====================
+res_Ncont$Nadd <- "Ncont"
+res_Ncess$Nadd <- "Ncess"
+
+final <- dplyr::bind_rows(res_Ncont, res_Ncess) %>%
+  dplyr::select(Nadd, Nlevel, Mean, SE, .group) %>%
+  dplyr::rename(Letter = .group)
+
+# View results
+print(final, n = Inf)
+
+# Export to Excel
+write_xlsx(final, "~/Desktop/codes/tables/Sp_table1_NH4.xlsx")
+cat("\n✅ Analysis completed! Results exported successfully.\n")
+```
+
+
+```{r}
+# Clear environment
+rm(list = ls())
+
+# Load packages
+library(readxl)
+library(dplyr)
+library(emmeans)
+library(multcomp)
+library(writexl)
+
+# Read data
+setwd("~/Desktop/codes")
+dat <- read_excel("~/Desktop/codes/data/Sp_Table1.xlsx", sheet = "Sheet1")
+
+# Factor settings
+dat$Nadd   <- factor(dat$Nadd, levels = c("Ncont", "Ncess"))
+dat$Nlevel <- factor(dat$Nlevel, levels = c("N0","N02","N05","N10","N15","N20","N50"))
+dat$Block  <- factor(dat$Block)
+
+# ==================== Analysis for NO3 ====================
+analyze_NO3 <- function(data, group_name, letter_type) {
+  model <- aov(NO3 ~ Nlevel + Block, data = data)
+  emm   <- emmeans(model, "Nlevel")
+  cl    <- cld(emm, Letters = letters, adjust = "tukey", reversed = TRUE)  # ← Tukey
+  
+  letters_df <- as.data.frame(cl) %>% dplyr::select(Nlevel, .group)
+  
+  stats <- data %>%
+    dplyr::group_by(Nlevel) %>%
+    dplyr::summarise(
+      Mean = round(mean(NO3, na.rm = TRUE), 3),
+      SE   = round(sd(NO3, na.rm = TRUE) / sqrt(n()), 3),
+      .groups = "drop"
+    )
+  
+  dplyr::left_join(stats, letters_df, by = "Nlevel")
+}
+
+# ==================== Run analysis ====================
+res_Ncont <- dat %>% dplyr::filter(Nadd == "Ncont") %>% analyze_NO3("Ncont", letters)
+res_Ncess <- dat %>% dplyr::filter(Nadd == "Ncess") %>% analyze_NO3("Ncess", letters)
+
+# ==================== Combine results ====================
+res_Ncont$Nadd <- "Ncont"
+res_Ncess$Nadd <- "Ncess"
+
+final <- dplyr::bind_rows(res_Ncont, res_Ncess) %>%
+  dplyr::select(Nadd, Nlevel, Mean, SE, .group) %>%
+  dplyr::rename(Letter = .group)
+
+# View results
+print(final, n = Inf)
+
+# Export to Excel
+write_xlsx(final, "~/Desktop/codes/tables/Sp_table1_NO3.xlsx")
+cat("\n✅ Analysis completed! Results exported successfully.\n")
+```
+
+```{r}
+# Clear environment
+rm(list = ls())
+
+# Load packages
+library(readxl)
+library(dplyr)
+library(emmeans)
+library(multcomp)
+library(writexl)
+
+# Read data
+setwd("~/Desktop/codes")
+dat <- read_excel("~/Desktop/codes/data/Sp_Table1.xlsx", sheet = "Sheet2")
+
+# Factor settings
+dat$Nadd   <- factor(dat$Nadd, levels = c("Ncont", "Ncess"))
+dat$Nlevel <- factor(dat$Nlevel, levels = c("N0","N02","N05","N10","N15","N20","N50"))
+dat$Block  <- factor(dat$Block)
+
+# ==================== Analysis for bac_biomass ====================
+analyze_bac_biomass <- function(data, group_name, letter_type) {
+  model <- aov(bac_biomass ~ Nlevel + Block, data = data)
+  emm   <- emmeans(model, "Nlevel")
+  cl    <- cld(emm, Letters = letters, adjust = "tukey", reversed = TRUE)  # ← Tukey
+  
+  letters_df <- as.data.frame(cl) %>% dplyr::select(Nlevel, .group)
+  
+  stats <- data %>%
+    dplyr::group_by(Nlevel) %>%
+    dplyr::summarise(
+      Mean = round(mean(bac_biomass, na.rm = TRUE), 3),
+      SE   = round(sd(bac_biomass, na.rm = TRUE) / sqrt(n()), 3),
+      .groups = "drop"
+    )
+  
+  dplyr::left_join(stats, letters_df, by = "Nlevel")
+}
+
+# ==================== Run analysis ====================
+res_Ncont <- dat %>% dplyr::filter(Nadd == "Ncont") %>% analyze_bac_biomass("Ncont", letters)
+res_Ncess <- dat %>% dplyr::filter(Nadd == "Ncess") %>% analyze_bac_biomass("Ncess", letters)
+
+# ==================== Combine results ====================
+res_Ncont$Nadd <- "Ncont"
+res_Ncess$Nadd <- "Ncess"
+
+final <- dplyr::bind_rows(res_Ncont, res_Ncess) %>%
+  dplyr::select(Nadd, Nlevel, Mean, SE, .group) %>%
+  dplyr::rename(Letter = .group)
+
+# View results
+print(final, n = Inf)
+
+# Export to Excel
+write_xlsx(final, "~/Desktop/codes/tables/Sp_table1_bac_biomass.xlsx")
+cat("\n✅ Analysis completed! Results exported successfully.\n")
+```
+
+```{r}
+# 清空环境
+rm(list = ls())
+
+# 必备包
+library(readxl)
+library(dplyr)
+library(emmeans)
+library(multcomp)
+library(writexl)
+
+# 读取数据
+setwd("~/Desktop/codes")
+dat <- read_excel("~/Desktop/codes/data/Sp_Table1.xlsx", sheet = "Sheet2")
+
+# 分组设置
+dat$Nadd   <- factor(dat$Nadd, levels = c("Ncont", "Ncess"))
+dat$Nlevel <- factor(dat$Nlevel, levels = c("N0","N02","N05","N10","N15","N20","N50"))
+dat$Block  <- factor(dat$Block)
+
+# ==================== 分析 fun_biomass ====================
+analyze_fun_biomass <- function(data, group_name, letter_type) {
+  model <- aov(fun_biomass ~ Nlevel + Block, data = data)
+  emm   <- emmeans(model, "Nlevel")
+  cl    <- cld(emm, Letters = letters, adjust = "tukey", reversed = TRUE)  # ← Tukey
+  
+  letters_df <- as.data.frame(cl) %>% dplyr::select(Nlevel, .group)
+  
+  stats <- data %>%
+    dplyr::group_by(Nlevel) %>%
+    dplyr::summarise(
+      Mean = round(mean(fun_biomass, na.rm = TRUE), 3),
+      SE   = round(sd(fun_biomass, na.rm = TRUE) / sqrt(n()), 3),
+      .groups = "drop"
+    )
+  
+  dplyr::left_join(stats, letters_df, by = "Nlevel")
+}
+
+# ==================== 运行 ====================
+res_Ncont <- dat %>% dplyr::filter(Nadd == "Ncont") %>% analyze_fun_biomass("Ncont", letters)
+res_Ncess <- dat %>% dplyr::filter(Nadd == "Ncess") %>% analyze_fun_biomass("Ncess", letters)
+
+# ==================== 合并结果 ====================
+res_Ncont$Nadd <- "Ncont"
+res_Ncess$Nadd <- "Ncess"
+
+final <- dplyr::bind_rows(res_Ncont, res_Ncess) %>%
+  dplyr::select(Nadd, Nlevel, Mean, SE, .group) %>%
+  dplyr::rename(Letter = .group)
+
+# 查看结果
+print(final, n = Inf)
+
+# 导出Excel
+write_xlsx(final, "~/Desktop/codes/tables/Sp_table1_fun_biomass.xlsx")
+cat("\n✅ Analysis completed! Results exported successfully.\n")
+```
+
+
+```{r cars}
+# Clear environment
+rm(list = ls())
+
+# Load packages
+library(readxl)
+library(dplyr)
+library(emmeans)
+library(multcomp)
+library(writexl)
+
+# Read data
+setwd("~/Desktop/codes")
+dat <- read_excel("~/Desktop/codes/data/Sp_Table1.xlsx", sheet = "Sheet2")
+
+# Factor settings
+dat$Nadd   <- factor(dat$Nadd, levels = c("Ncont", "Ncess"))
+dat$Nlevel <- factor(dat$Nlevel, levels = c("N0","N02","N05","N10","N15","N20","N50"))
+dat$Block  <- factor(dat$Block)
+
+# ==================== Analysis for all_biomass ====================
+analyze_all_biomass <- function(data, group_name, letter_type) {
+  model <- aov(all_biomass ~ Nlevel + Block, data = data)
+  emm   <- emmeans(model, "Nlevel")
+  cl    <- cld(emm, Letters = letters, adjust = "tukey", reversed = TRUE)  # ← 改这里
+  
+  letters_df <- as.data.frame(cl) %>% dplyr::select(Nlevel, .group)
+  
+  stats <- data %>%
+    dplyr::group_by(Nlevel) %>%
+    dplyr::summarise(
+      Mean = round(mean(all_biomass, na.rm = TRUE), 3),
+      SE   = round(sd(all_biomass, na.rm = TRUE) / sqrt(n()), 3),
+      .groups = "drop"
+    )
+  
+  dplyr::left_join(stats, letters_df, by = "Nlevel")
+}
+
+# ==================== Run analysis ====================
+res_Ncont <- dat %>% dplyr::filter(Nadd == "Ncont") %>% analyze_all_biomass("Ncont", letters)
+res_Ncess <- dat %>% dplyr::filter(Nadd == "Ncess") %>% analyze_all_biomass("Ncess", letters)
+
+# ==================== Combine results ====================
+res_Ncont$Nadd <- "Ncont"
+res_Ncess$Nadd <- "Ncess"
+
+final <- dplyr::bind_rows(res_Ncont, res_Ncess) %>%
+  dplyr::select(Nadd, Nlevel, Mean, SE, .group) %>%
+  dplyr::rename(Letter = .group)
+
+# View results
+print(final, n = Inf)
+
+# Export to Excel
+write_xlsx(final, "~/Desktop/codes/tables/Sp_table1_Abiomass.xlsx")
+cat("\n✅ Analysis completed! Results exported successfully.\n")
+```
+
+```{r}
+# Clear environment
+rm(list = ls())
+
+# Load packages
+library(readxl)
+library(dplyr)
+library(emmeans)
+library(multcomp)
+library(writexl)
+
+# Read data
+setwd("~/Desktop/codes")
+dat <- read_excel("~/Desktop/codes/data/Sp_Table1.xlsx", sheet = "Sheet1")
+
+# Factor settings
+dat$Nadd   <- factor(dat$Nadd, levels = c("Ncont", "Ncess"))
+dat$Nlevel <- factor(dat$Nlevel, levels = c("N0","N02","N05","N10","N15","N20","N50"))
+dat$Block  <- factor(dat$Block)
+
+# ==================== Analysis for poc ====================
+analyze_poc <- function(data, group_name, letter_type) {
+  model <- aov(poc ~ Nlevel + Block, data = data)
+  emm   <- emmeans(model, "Nlevel")
+  cl    <- cld(emm, Letters = letters, adjust = "tukey", reversed = TRUE)  # ← Tukey
+  
+  letters_df <- as.data.frame(cl) %>% dplyr::select(Nlevel, .group)
+  
+  stats <- data %>%
+    dplyr::group_by(Nlevel) %>%
+    dplyr::summarise(
+      Mean = round(mean(poc, na.rm = TRUE), 3),
+      SE   = round(sd(poc, na.rm = TRUE) / sqrt(n()), 3),
+      .groups = "drop"
+    )
+  
+  dplyr::left_join(stats, letters_df, by = "Nlevel")
+}
+
+# ==================== Run analysis ====================
+res_Ncont <- dat %>% dplyr::filter(Nadd == "Ncont") %>% analyze_poc("Ncont", letters)
+res_Ncess <- dat %>% dplyr::filter(Nadd == "Ncess") %>% analyze_poc("Ncess", letters)
+
+# ==================== Combine results ====================
+res_Ncont$Nadd <- "Ncont"
+res_Ncess$Nadd <- "Ncess"
+
+final <- dplyr::bind_rows(res_Ncont, res_Ncess) %>%
+  dplyr::select(Nadd, Nlevel, Mean, SE, .group) %>%
+  dplyr::rename(Letter = .group)
+
+# View results
+print(final, n = Inf)
+
+# Export to Excel
+write_xlsx(final, "~/Desktop/codes/tables/Sp_table1_poc.xlsx")
+cat("\n✅ Analysis completed! Results exported successfully.\n")
+```
+
+
+```{r}
+# Clear environment
+rm(list = ls())
+
+# Load packages
+library(readxl)
+library(dplyr)
+library(emmeans)
+library(multcomp)
+library(writexl)
+
+# Read data
+setwd("~/Desktop/codes")
+dat <- read_excel("~/Desktop/codes/data/Sp_Table1.xlsx", sheet = "Sheet1")
+
+# Factor settings
+dat$Nadd   <- factor(dat$Nadd, levels = c("Ncont", "Ncess"))
+dat$Nlevel <- factor(dat$Nlevel, levels = c("N0","N02","N05","N10","N15","N20","N50"))
+dat$Block  <- factor(dat$Block)
+
+# ==================== Analysis for maoc ====================
+analyze_maoc <- function(data, group_name, letter_type) {
+  model <- aov(maoc ~ Nlevel + Block, data = data)
+  emm   <- emmeans(model, "Nlevel")
+  cl    <- cld(emm, Letters = letters, adjust = "tukey", reversed = TRUE)  # ← Tukey
+  
+  letters_df <- as.data.frame(cl) %>% dplyr::select(Nlevel, .group)
+  
+  stats <- data %>%
+    dplyr::group_by(Nlevel) %>%
+    dplyr::summarise(
+      Mean = round(mean(maoc, na.rm = TRUE), 3),
+      SE   = round(sd(maoc, na.rm = TRUE) / sqrt(n()), 3),
+      .groups = "drop"
+    )
+  
+  dplyr::left_join(stats, letters_df, by = "Nlevel")
+}
+
+# ==================== Run analysis ====================
+res_Ncont <- dat %>% dplyr::filter(Nadd == "Ncont") %>% analyze_maoc("Ncont", letters)
+res_Ncess <- dat %>% dplyr::filter(Nadd == "Ncess") %>% analyze_maoc("Ncess", letters)
+
+# ==================== Combine results ====================
+res_Ncont$Nadd <- "Ncont"
+res_Ncess$Nadd <- "Ncess"
+
+final <- dplyr::bind_rows(res_Ncont, res_Ncess) %>%
+  dplyr::select(Nadd, Nlevel, Mean, SE, .group) %>%
+  dplyr::rename(Letter = .group)
+
+# View results
+print(final, n = Inf)
+
+# Export to Excel
+write_xlsx(final, "~/Desktop/codes/tables/Sp_table1_maoc.xlsx")
+cat("\n✅ Analysis completed! Results exported successfully.\n")
+```
+
+```{r}
+# Clear environment
+rm(list = ls())
+
+# Load packages
+library(readxl)
+library(dplyr)
+library(emmeans)
+library(multcomp)
+library(writexl)
+
+# Read data
+setwd("~/Desktop/codes")
+dat <- read_excel("~/Desktop/codes/data/Sp_Table1.xlsx", sheet = "Sheet1")
+
+# Factor settings
+dat$Nadd   <- factor(dat$Nadd, levels = c("Ncont", "Ncess"))
+dat$Nlevel <- factor(dat$Nlevel, levels = c("N0","N02","N05","N10","N15","N20","N50"))
+dat$Block  <- factor(dat$Block)
+
+# ==================== Analysis for soc ====================
+analyze_soc <- function(data, group_name, letter_type) {
+  model <- aov(soc ~ Nlevel + Block, data = data)
+  emm   <- emmeans(model, "Nlevel")
+  cl    <- cld(emm, Letters = letters, adjust = "tukey", reversed = TRUE)  # ← Tukey
+  
+  letters_df <- as.data.frame(cl) %>% dplyr::select(Nlevel, .group)
+  
+  stats <- data %>%
+    dplyr::group_by(Nlevel) %>%
+    dplyr::summarise(
+      Mean = round(mean(soc, na.rm = TRUE), 3),
+      SE   = round(sd(soc, na.rm = TRUE) / sqrt(n()), 3),
+      .groups = "drop"
+    )
+  
+  dplyr::left_join(stats, letters_df, by = "Nlevel")
+}
+
+# ==================== Run analysis ====================
+res_Ncont <- dat %>% dplyr::filter(Nadd == "Ncont") %>% analyze_soc("Ncont", letters)
+res_Ncess <- dat %>% dplyr::filter(Nadd == "Ncess") %>% analyze_soc("Ncess", letters)
+
+# ==================== Combine results ====================
+res_Ncont$Nadd <- "Ncont"
+res_Ncess$Nadd <- "Ncess"
+
+final <- dplyr::bind_rows(res_Ncont, res_Ncess) %>%
+  dplyr::select(Nadd, Nlevel, Mean, SE, .group) %>%
+  dplyr::rename(Letter = .group)
+
+# View results
+print(final, n = Inf)
+
+# Export to Excel
+write_xlsx(final, "~/Desktop/codes/tables/Sp_table1_soc.xlsx")
+cat("\n✅ Analysis completed! Results exported successfully.\n")
+```
+

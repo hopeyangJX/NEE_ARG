@@ -1,0 +1,97 @@
+---
+title: "Sp_Fig1"
+output: html_document
+date: "2026-10-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars,fig.width=10,fig.height=7}
+library(readxl)
+library(tidyverse)
+setwd("~/Desktop/codes")
+
+# ============ 1. Read data ============
+da <- read_excel("~/Desktop/codes/data/Sp_Fig1_data.xlsx", sheet = "coverage")
+
+# ============ 2. Re-bin ============
+bin_levels <- c(
+  "0",
+  "0-1×",
+  "1-10×",
+  "10-100×",
+  "100-1000×",
+  "1000-10000×",
+  "10000-100000×"
+)
+
+da <- da %>%
+  mutate(
+    cov_bin = case_when(
+      coverage == 0        ~ "0",
+      coverage <= 1        ~ "0-1×",
+      coverage <= 10       ~ "1-10×",
+      coverage <= 100      ~ "10-100×",
+      coverage <= 1000     ~ "100-1000×",
+      coverage <= 10000    ~ "1000-10000×",
+      TRUE                 ~ "10000-100000×"
+    ),
+    cov_bin = factor(cov_bin, levels = bin_levels)
+  )
+
+# ============ 3. Count BGCs and percentages for each bin ============
+bin_summary <- da %>%
+  count(cov_bin, .drop = FALSE) %>%
+  mutate(
+    pct_raw = n / sum(n) * 100,
+    pct_round = round(pct_raw, 2)  # keep two decimal places first
+  )
+
+# Adjust rounding error so the sum is exactly 100.00
+diff <- 100 - sum(bin_summary$pct_round)
+if (abs(diff) > 1e-9) {
+  # Find the bin with the largest difference between raw and rounded values (most affected by rounding)
+  idx <- which.max(abs(bin_summary$pct_raw - bin_summary$pct_round))
+  bin_summary$pct_round[idx] <- bin_summary$pct_round[idx] + diff
+}
+
+print(bin_summary)
+
+# ============ 4. Plot ============
+bar_color <- "#7A3D9E"  
+
+p <- ggplot(bin_summary, aes(x = cov_bin, y = n)) +
+  geom_col(fill = bar_color, color = "white",
+           linewidth = 0.3, width = 0.85, alpha = 0.5) +
+  # Add percentages above bars, rounded to two decimal places
+  geom_text(aes(label = sprintf("%.2f%%", pct_round)),
+            vjust = -0.5, size = 4.5, fontface = "bold") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  labs(
+    x = "Coverage of BGC (×)",
+    y = "Number of BGCs"
+  ) +
+  theme_bw(base_size = 16) +
+  theme(
+    panel.grid = element_blank(),
+    axis.text.x  = element_text(color = "black", face = "bold",
+                                angle = 45, hjust = 1),
+    axis.text.y  = element_text(color = "black", face = "bold"),
+    axis.title   = element_text(color = "black", face = "bold")
+  )
+
+print(p)
+
+# ============ 5. Export figure and summary table ============
+ggsave("~/Desktop/codes/figures/Sp_Fig1.pdf", p,
+       width = 10, height = 7, dpi = 600)
+```
+
